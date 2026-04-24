@@ -5,3 +5,4 @@ data/
 .env
 .claude
 config.json
+nohup.out

@@ -340,12 +340,12 @@ def build_dashboard_data() -> dict:
 app = FastAPI(title="WeatherBot Operations Center", version="1.0.0")
 
 # Mount static files if the directory exists
-_static_dir = BASE_DIR / "static"
+_static_dir = BASE_DIR / "dashboard_ui" / "static"
 _static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 # Jinja2 templates
-_templates_dir = BASE_DIR / "templates"
+_templates_dir = BASE_DIR / "dashboard_ui" / "templates"
 _templates_dir.mkdir(exist_ok=True)
 templates = Jinja2Templates(directory=str(_templates_dir))
 
@@ -486,7 +486,7 @@ async def simulation_json():
 @app.get("/retro", response_class=HTMLResponse)
 async def retro():
     """Serve the retro terminal dashboard (sim_dashboard_report.html)."""
-    html_path = BASE_DIR / "sim_dashboard_report.html"
+    html_path = BASE_DIR / "dashboard_ui" / "sim_dashboard_report.html"
     if not html_path.exists():
         return HTMLResponse(content="sim_dashboard_report.html not found", status_code=404)
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))

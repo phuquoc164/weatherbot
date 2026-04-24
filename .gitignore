@@ -6,3 +6,5 @@ data/
 .claude
 config.json
 nohup.out
+.coverage
+htmlcov/

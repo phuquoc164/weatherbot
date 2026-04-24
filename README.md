@@ -1,5 +1,9 @@
 # WeatherBot — Polymarket Weather Trading Bot
 
+![CI](https://github.com/phuquoc164/weatherbot/actions/workflows/ci.yml/badge.svg)
+
+> **NOTE:** This project is inspired by and based on [alteregoeth-ai/weatherbot](https://github.com/alteregoeth-ai/weatherbot), modified to fit specific trading needs: dynamic resolution station detection, dual dashboard system, self-calibration, and an extended testing framework.
+
 Automated weather market trading bot for Polymarket. Finds mispriced temperature outcomes using real forecast data from multiple sources across 20 cities worldwide.
 
 No SDK. No black box. Pure Python.
@@ -36,15 +40,18 @@ Every Polymarket weather market resolves on a specific airport station. NYC reso
 | Seattle | KSEA | Sea-Tac |
 | Atlanta | KATL | Hartsfield |
 | London | EGLC | London City |
+| Paris | LFPB | Le Bourget |
 | Tokyo | RJTT | Haneda |
 | ... | ... | ... |
+
+Polymarket can change its resolution station at any time (Paris switched from CDG to Le Bourget in April 2026 following a sensor manipulation incident). This bot detects the active station dynamically — every new market reads the `resolutionSource` field from the Polymarket API and updates its station accordingly, so calibration and METAR observations always match what Polymarket resolves against.
 
 ---
 
 ## Installation
 
 ```bash
-git clone https://github.com/alteregoeth-ai/weatherbot
+git clone https://github.com/phuquoc164/weatherbot
 cd weatherbot
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
@@ -161,6 +168,7 @@ Terminal 2:  venv/bin/python dashboard.py     # both dashboards
 - **Forecast-change close** — exits early if forecast shifts out of the bet's bucket
 - **Slippage filter** — skips markets with spread > `max_slippage`
 - **Self-calibration** — learns forecast accuracy (sigma) per city/source over time
+- **Dynamic resolution station** — reads Polymarket's `resolutionSource` field on each new market, auto-corrects the station if Polymarket changes it
 
 ---
 
@@ -199,3 +207,4 @@ Full documentation in `docs/`:
 ## Disclaimer
 
 This is not financial advice. Prediction markets carry real risk. Run the bot in paper-trading mode and study the results thoroughly before committing real capital.
+

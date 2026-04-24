@@ -59,7 +59,7 @@ LOCATIONS = {
     "seattle":      {"lat": 47.4502,  "lon": -122.3088, "name": "Seattle",       "station": "KSEA", "unit": "F", "region": "us"},
     "atlanta":      {"lat": 33.6407,  "lon":  -84.4277, "name": "Atlanta",       "station": "KATL", "unit": "F", "region": "us"},
     "london":       {"lat": 51.5048,  "lon":    0.0495, "name": "London",        "station": "EGLC", "unit": "C", "region": "eu"},
-    "paris":        {"lat": 48.9962,  "lon":    2.5979, "name": "Paris",         "station": "LFPG", "unit": "C", "region": "eu"},
+    "paris":        {"lat": 48.9694,  "lon":    2.4414, "name": "Paris",         "station": "LFPB", "unit": "C", "region": "eu"},
     "munich":       {"lat": 48.3537,  "lon":   11.7750, "name": "Munich",        "station": "EDDM", "unit": "C", "region": "eu"},
     "ankara":       {"lat": 40.1281,  "lon":   32.9951, "name": "Ankara",        "station": "LTAC", "unit": "C", "region": "eu"},
     "seoul":        {"lat": 37.4691,  "lon":  126.4505, "name": "Seoul",         "station": "RKSI", "unit": "C", "region": "asia"},
@@ -303,6 +303,17 @@ def get_polymarket_event(city_slug, month, day, year):
         pass
     return None
 
+def parse_resolution_station(url):
+    """Extract ICAO station code from a Wunderground resolution URL.
+    e.g. https://www.wunderground.com/history/daily/fr/bonneuil-en-france/LFPB -> LFPB
+    """
+    if not url:
+        return None
+    segment = url.rstrip("/").split("/")[-1]
+    if len(segment) == 4 and segment.isalpha():
+        return segment.upper()
+    return None
+
 def get_market_price(market_id):
     try:
         r = requests.get(f"https://gamma-api.polymarket.com/markets/{market_id}", timeout=(3, 5))
@@ -369,12 +380,18 @@ def load_all_markets():
 
 def new_market(city_slug, date_str, event, hours):
     loc = LOCATIONS[city_slug]
+    resolution_url     = event.get("resolutionSource")
+    resolution_station = parse_resolution_station(resolution_url)
+    if resolution_station:
+        LOCATIONS[city_slug]["station"] = resolution_station  # keep in-memory station in sync
+    station = resolution_station or loc["station"]
     return {
         "city":               city_slug,
         "city_name":          loc["name"],
         "date":               date_str,
         "unit":               loc["unit"],
-        "station":            loc["station"],
+        "station":            station,
+        "resolution_source":  resolution_url,
         "event_end_date":     event.get("endDate", ""),
         "hours_at_discovery": round(hours, 1),
         "status":             "open",           # open | closed | resolved
@@ -749,6 +766,7 @@ def scan_and_update():
         mkt["pnl"]          = pnl
         mkt["status"]       = "resolved"
         mkt["resolved_outcome"] = "win" if won else "loss"
+        mkt["actual_temp"]  = get_actual_temp(mkt["city"], mkt["date"])
 
         if won:
             state["wins"] += 1

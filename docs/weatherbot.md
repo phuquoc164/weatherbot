@@ -8,7 +8,7 @@ A paper-trading bot that monitors daily high-temperature markets on [Polymarket]
 
 1. [Overview](#overview)
 2. [Usage](#usage)
-3. [Simulation Dashboard](#simulation-dashboard)
+3. [Dashboards](#dashboards)
 4. [Configuration](#configuration)
 5. [Supported Locations](#supported-locations)
 6. [Data Sources](#data-sources)
@@ -17,7 +17,8 @@ A paper-trading bot that monitors daily high-temperature markets on [Polymarket]
 9. [Data Persistence](#data-persistence)
 10. [Calibration System](#calibration-system)
 11. [Timing & Loop Structure](#timing--loop-structure)
-12. [Function Reference](#function-reference)
+12. [Python Patterns & Code Notes](#python-patterns--code-notes)
+13. [Function Reference](#function-reference)
 
 ---
 
@@ -47,53 +48,61 @@ Weather APIs (ECMWF, HRRR, METAR)
 
 ## Usage
 
-Run from the directory containing `config.json`:
+Always run from the project root (where `config.json` lives) using the venv Python:
 
 ```bash
+# activate venv first (recommended)
+source venv/bin/activate
+
 python weatherbot.py          # start main loop (default)
 python weatherbot.py run      # same as above
 python weatherbot.py status   # print balance and open positions
 python weatherbot.py report   # full resolved-trade report
 ```
 
----
-
-## Simulation Dashboard
-
-`sim_dashboard_report.html` is a browser-based dashboard that visualises simulation results. It reads data from a `simulation.json` file in the same directory and auto-refreshes every 10 seconds.
-
-### Why a local server is required
-
-The dashboard loads `simulation.json` via the browser's `fetch()` API. Browsers block file-system fetches (`file://` URLs) for security reasons, so opening the HTML file directly will show a warning and no data. A local HTTP server sidesteps this restriction.
-
-### How to run
-
-**1. Start a local HTTP server** from the `weatherbot/` directory:
+Or call the venv interpreter directly without activating:
 
 ```bash
-python -m http.server 8000
+venv/bin/python weatherbot.py
 ```
 
-**2. Open the dashboard** in your browser:
+**Run in background (persistent):**
 
+```bash
+nohup venv/bin/python -u weatherbot.py >> nohup.out 2>&1 &
+echo $! > weatherbot.pid        # save PID for easy stop
+
+# stop it later
+kill $(cat weatherbot.pid)
 ```
-http://localhost:8000/sim_dashboard_report.html
-```
 
-The dashboard will auto-refresh every 10 seconds, picking up any changes to `simulation.json` automatically.
+---
 
-### What you need
+## Dashboards
 
-| File | Required | Description |
+The project has two browser dashboards, both served by `dashboard.py`.
+
+| URL | Style | Description |
 |---|---|---|
-| `sim_dashboard_report.html` | Yes | The dashboard itself |
-| `simulation.json` | Yes | Simulation output data read by the dashboard |
+| `http://localhost:8050/` | Bloomberg dark | Full operations center (KPIs, map, WebSocket push) |
+| `http://localhost:8050/retro` | Retro terminal | Balance chart, open positions, EV log |
 
-The dashboard also loads Chart.js and Google Fonts from CDNs — an internet connection is required for those assets to render correctly.
+Start the dashboard server:
 
-### Stopping the server
+```bash
+venv/bin/python dashboard.py
+```
 
-Press `Ctrl+C` in the terminal running `python -m http.server` to stop it.
+Both dashboards are then available — no extra processes needed.
+
+**Typical workflow (2 terminals):**
+
+```
+Terminal 1:  venv/bin/python weatherbot.py    # bot
+Terminal 2:  venv/bin/python dashboard.py     # both dashboards
+```
+
+See `docs/dashboard.md` for the full dashboard reference.
 
 ---
 
@@ -440,6 +449,133 @@ Main loop:
 **Error handling:** `ConnectionError` retries after 60 seconds. Any other exception also waits 60 seconds. `KeyboardInterrupt` exits cleanly and saves state.
 
 **Note:** Both `config.json` and the `data/` directory are resolved relative to the current working directory. Always run from the project root.
+
+---
+
+## Python Patterns & Code Notes
+
+This section documents the key Python patterns used in `weatherbot.py` and notes areas relevant for developers extending or maintaining the code.
+
+### Patterns Used
+
+**`pathlib.Path` for all file operations**
+
+The code uses `pathlib.Path` throughout instead of `os.path` string manipulation — the idiomatic Python 3 approach:
+
+```python
+DATA_DIR   = Path("data")
+STATE_FILE = DATA_DIR / "state.json"
+
+# Reading
+STATE_FILE.read_text(encoding="utf-8")
+
+# Writing
+STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+# Glob
+for f in MARKETS_DIR.glob("*.json"):
+    ...
+```
+
+**EAFP (Easier to Ask Forgiveness Than Permission)**
+
+External API calls use `try/except` rather than pre-checking conditions — the preferred Python idiom for I/O-bound operations:
+
+```python
+try:
+    data = requests.get(url, timeout=(5, 10)).json()
+    ...
+except Exception as e:
+    print(f"  [ECMWF] {city_slug}: {e}")
+```
+
+**List comprehensions for filtering**
+
+Used cleanly throughout for filtering markets and collecting errors:
+
+```python
+resolved = [m for m in markets if m.get("resolved") and m.get("actual_temp") is not None]
+errors   = [abs(snap["temp"] - m["actual_temp"]) for snap in snapshots if snap.get("temp")]
+```
+
+**f-strings for all string formatting**
+
+All output uses f-strings (Python 3.6+), which is the modern idiomatic choice over `%` formatting or `.format()`.
+
+**`deque` in dashboard.py for bounded activity feed**
+
+The dashboard uses `collections.deque(maxlen=100)` — the correct pattern for a fixed-size FIFO buffer, avoiding manual list slicing.
+
+---
+
+### Type Hints
+
+`weatherbot.py` has **no type annotations**. This is acceptable for a single-file script, but if the project grows, adding hints to the core functions improves IDE support and catches bugs early:
+
+```python
+# Current
+def calc_ev(p, price):
+    ...
+
+# With type hints
+def calc_ev(p: float, price: float) -> float:
+    ...
+```
+
+`dashboard.py` uses `Optional[dict]` and `list[dict]` from `typing` — it is partially annotated.
+
+---
+
+### Anti-Patterns to Be Aware Of
+
+**Mutable module-level state**
+
+`_cal: dict = {}` is a mutable global updated in-place across the loop. It works here because the bot is single-threaded, but it would be a source of bugs in a concurrent context.
+
+**`print()` instead of `logging`**
+
+All output goes to stdout via `print()`. There are no log levels, no timestamps in the output (only in the loop header), and no file-based log rotation. For production use, replacing `print()` with Python's `logging` module would allow filtering by severity and writing to a file:
+
+```python
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(), logging.FileHandler("weatherbot.log")]
+)
+log = logging.getLogger(__name__)
+
+# replace print(f"  [BUY] ...") with:
+log.info("[BUY] %s %s ...", city_name, date)
+```
+
+**Broad `except Exception`**
+
+API retry loops catch all exceptions with `except Exception as e`. This is intentional for resilience, but it can hide unexpected errors (e.g., `TypeError` from a changed API response shape). Worth narrowing to `requests.RequestException` for HTTP errors if debugging becomes difficult.
+
+**Config loaded at import time**
+
+`config.json` is read at module level with `open("config.json")`. This means the file must exist in the working directory at import time — running from a different directory will fail immediately. Always `cd` to the project root before running.
+
+---
+
+### Recommended Tooling
+
+To maintain code quality if extending the project:
+
+```bash
+# Format code consistently
+black weatherbot.py dashboard.py
+
+# Sort imports
+isort weatherbot.py dashboard.py
+
+# Lint for common issues
+ruff check .
+
+# Type check (after adding hints)
+mypy weatherbot.py
+```
 
 ---
 

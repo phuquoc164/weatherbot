@@ -1,23 +1,8 @@
-# 🌤 WeatherBot — Polymarket Weather Trading Bot
+# WeatherBot — Polymarket Weather Trading Bot
 
 Automated weather market trading bot for Polymarket. Finds mispriced temperature outcomes using real forecast data from multiple sources across 20 cities worldwide.
 
 No SDK. No black box. Pure Python.
-
----
-
-## Versions
-
-### `weatherbot.py` — Full Bot (current)
-Everything in v1, plus:
-- **20 cities** across 4 continents (US, Europe, Asia, South America, Oceania)
-- **3 forecast sources** — ECMWF (global), HRRR/GFS (US, hourly), METAR (real-time observations)
-- **Expected Value** — skips trades where the math doesn't work
-- **Kelly Criterion** — sizes positions based on edge strength
-- **Stop-loss + trailing stop** — 20% stop, moves to breakeven at +20%
-- **Slippage filter** — skips markets with spread > $0.03
-- **Self-calibration** — learns forecast accuracy per city over time
-- **Full data storage** — every forecast snapshot, trade, and resolution saved to JSON
 
 ---
 
@@ -32,7 +17,7 @@ The bot:
 4. Calculates Expected Value — only enters if the math is positive
 5. Sizes the position using fractional Kelly Criterion
 6. Monitors stops every 10 minutes, full scan every hour
-7. Auto-resolves markets by querying Polymarket API directly
+7. Auto-resolves markets by querying the Polymarket API directly
 
 ---
 
@@ -57,13 +42,16 @@ Every Polymarket weather market resolves on a specific airport station. NYC reso
 ---
 
 ## Installation
+
 ```bash
-git clone https://github.com/phuquoc164/weatherbot
+git clone https://github.com/alteregoeth-ai/weatherbot
 cd weatherbot
-pip install -r requirements.txt
+python3 -m venv venv
+venv/bin/pip install -r requirements.txt
 ```
 
-Create `config.json` based on `config.example.json` in the project folder:
+Create `config.json` in the project root:
+
 ```json
 {
   "balance": 10000.0,
@@ -81,61 +69,110 @@ Create `config.json` based on `config.example.json` in the project folder:
 }
 ```
 
-Get a free Visual Crossing API key at visualcrossing.com — used to fetch actual temperatures after market resolution.
+Get a free Visual Crossing API key at [visualcrossing.com](https://www.visualcrossing.com) — used to fetch actual temperatures after market resolution.
 
 ---
 
 ## Usage
 
 ### Bot
+
 ```bash
+source venv/bin/activate
+
 python weatherbot.py           # start the bot — scans every hour
 python weatherbot.py status    # balance and open positions
 python weatherbot.py report    # full breakdown of all resolved markets
-
-# Run in background with real-time logging
-nohup python -u weatherbot.py >> nohup.out 2>&1 &
-tail -f nohup.out          # follow the log
 ```
 
-### Dashboard
-
-A real-time Bloomberg-style operations center that reads the bot's JSON files and displays everything in a single-page UI.
+**Run in background:**
 
 ```bash
-python dashboard.py                    # start on default port 8050
-python dashboard.py --port 9000        # custom port
+nohup venv/bin/python -u weatherbot.py >> nohup.out 2>&1 &
+echo $! > weatherbot.pid       # save PID
+
+tail -f nohup.out              # follow the log
+kill $(cat weatherbot.pid)     # stop the bot
 ```
 
-Open `http://localhost:8050` in your browser.
+### Dashboards
 
-**Features:**
-- **KPI Strip** — Starting balance, open positions cost, realized/unrealized P&L, cash available, win rate, drawdown
+Start the dashboard server:
+
+```bash
+venv/bin/python dashboard.py
+```
+
+Two dashboards are served from the same process:
+
+| URL | Style | Description |
+|---|---|---|
+| `http://localhost:8050/` | Bloomberg dark | KPIs, world map, WebSocket push |
+| `http://localhost:8050/retro` | Retro terminal | Balance chart, open positions, EV log |
+
+**Custom port:**
+
+```bash
+venv/bin/python dashboard.py --port 9000
+```
+
+**Typical workflow (2 terminals):**
+
+```
+Terminal 1:  venv/bin/python weatherbot.py    # bot
+Terminal 2:  venv/bin/python dashboard.py     # both dashboards
+```
+
+---
+
+## Dashboard Features
+
+### Bloomberg Dashboard (`/`)
+
+- **KPI Strip** — Starting balance, open cost, realized/unrealized P&L, cash, win rate, drawdown
 - **World Map** — Interactive Leaflet.js map with 20 city markers showing forecast, EV, and position status
 - **Open Positions** — Live table with entry → current price and unrealized P&L
-- **Trade History** — Closed positions with close reason (stop_loss, trailing_stop, take_profit, forecast_changed) and realized P&L
+- **Trade History** — Closed positions with close reason and realized P&L
 - **Forecast Sources** — Side-by-side comparison of ECMWF, HRRR, and METAR for all cities
-- **Calibration** — Forecast accuracy (sigma) per city/source (appears after enough resolved markets)
-- **Activity Feed** — Real-time event log reconstructed from market file changes
+- **Calibration** — Forecast accuracy (sigma) per city/source
+- **Activity Feed** — Real-time event log (buys, exits, forecasts)
 - **Balance Chart** — Equity history over time
+- **Real-time updates** via WebSocket (file-watcher based, no polling)
 
-**Real-time updates:** The dashboard watches the `data/` directory for file changes and pushes updates via WebSocket. Falls back to 30-second polling if WebSocket disconnects.
+### Retro Terminal Dashboard (`/retro`)
 
-**Tech stack:** FastAPI, Jinja2, Chart.js, Leaflet.js — no Node.js or build tools required.
+- Balance chart with live delta animations
+- Open positions with Kelly % and EV
+- Chronological trade log (entry + exit events)
+- EV signal log for recent entries
+- Polls `/simulation.json` every 10 seconds
 
-**Note:** The dashboard calculates all KPIs directly from market JSON files rather than trusting `state.json`, ensuring accurate financial data.
+---
+
+## Bot Features
+
+- **20 cities** across 6 regions (US, Europe, Asia, South America, Canada, Oceania)
+- **3 forecast sources** — ECMWF (global, 7-day), HRRR/GFS (US, 48h), METAR (real-time observed)
+- **Expected Value filter** — skips trades where EV < `min_ev`
+- **Kelly Criterion** — quarter-Kelly bet sizing, capped at `max_bet`
+- **Stop-loss** — 20% stop on every position
+- **Trailing stop** — moves to breakeven at +20% gain
+- **Take-profit** — dynamic thresholds based on hours to resolution
+- **Forecast-change close** — exits early if forecast shifts out of the bet's bucket
+- **Slippage filter** — skips markets with spread > `max_slippage`
+- **Self-calibration** — learns forecast accuracy (sigma) per city/source over time
 
 ---
 
 ## Data Storage
 
-All data is saved to `data/markets/` — one JSON file per market. Each file contains:
+All data is saved to `data/` — one JSON file per market. Each file contains:
 - Hourly forecast snapshots (ECMWF, HRRR, METAR)
 - Market price history
 - Position details (entry, stop, PnL)
 - Final resolution outcome
 
-This data is used for self-calibration — the bot learns forecast accuracy per city over time and adjusts position sizing accordingly.
+This data drives the dashboards and the self-calibration system.
 
 ---
 
@@ -143,13 +180,22 @@ This data is used for self-calibration — the bot learns forecast accuracy per 
 
 | API | Auth | Purpose |
 |-----|------|---------|
-| Open-Meteo | None | ECMWF + HRRR forecasts |
+| Open-Meteo | None | ECMWF + HRRR/GFS forecasts |
 | Aviation Weather (METAR) | None | Real-time station observations |
-| Polymarket Gamma | None | Market data |
+| Polymarket Gamma | None | Market data and resolution |
 | Visual Crossing | Free key | Historical temps for resolution |
+
+---
+
+## Documentation
+
+Full documentation in `docs/`:
+
+- [`docs/weatherbot.md`](docs/weatherbot.md) — bot configuration, trading logic, data persistence, function reference
+- [`docs/dashboard.md`](docs/dashboard.md) — dashboard architecture, REST API, WebSocket, KPI calculations
 
 ---
 
 ## Disclaimer
 
-This is not financial advice. Prediction markets carry real risk. Run the simulation thoroughly before committing real capital.
+This is not financial advice. Prediction markets carry real risk. Run the bot in paper-trading mode and study the results thoroughly before committing real capital.

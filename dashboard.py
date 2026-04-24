@@ -396,6 +396,101 @@ async def api_bot_status():
 async def api_dashboard():
     return build_dashboard_data()
 
+
+@app.get("/simulation.json")
+async def simulation_json():
+    """Build the payload expected by sim_dashboard_report.html (retro dashboard)."""
+    state = read_state()
+    markets = read_all_markets()
+
+    positions = {}
+    trades = []
+
+    for key, mkt in markets.items():
+        pos = mkt.get("position")
+        if not pos:
+            continue
+
+        city_name = mkt.get("city_name", mkt.get("city", ""))
+        date      = mkt.get("date", "")
+        unit_sym  = "°F" if mkt.get("unit", "F") == "F" else "°C"
+        b_low     = pos.get("bucket_low")
+        b_high    = pos.get("bucket_high")
+        question  = pos.get("question") or f"Highest temp in {city_name} on {date}: {b_low}-{b_high}{unit_sym}"
+
+        if pos.get("status") == "open":
+            entry_price   = pos.get("entry_price", 0)
+            current_price = entry_price
+            market_id     = pos.get("market_id")
+            if market_id:
+                for o in mkt.get("all_outcomes", []):
+                    if o.get("market_id") == market_id:
+                        current_price = o.get("bid", o.get("price", entry_price))
+                        break
+            shares     = pos.get("shares", 0)
+            unrealized = round((current_price - entry_price) * shares, 2)
+
+            positions[key] = {
+                "question":      question,
+                "location":      city_name,
+                "date":          date,
+                "entry_price":   entry_price,
+                "current_price": current_price,
+                "cost":          pos.get("cost", 0),
+                "pnl":           unrealized,
+                "ev":            pos.get("ev", 0),
+                "kelly_pct":     pos.get("kelly", 0),
+            }
+            trades.append({
+                "type":        "entry",
+                "question":    question,
+                "location":    city_name,
+                "date":        date,
+                "entry_price": pos.get("entry_price", 0),
+                "our_prob":    pos.get("p", 0),
+                "ev":          pos.get("ev", 0),
+                "kelly_pct":   pos.get("kelly", 0),
+                "cost":        pos.get("cost", 0),
+                "opened_at":   pos.get("opened_at", ""),
+            })
+
+        elif pos.get("status") == "closed":
+            trades.append({
+                "type":         "exit",
+                "question":     question,
+                "location":     city_name,
+                "date":         date,
+                "pnl":          pos.get("pnl", 0),
+                "ev":           pos.get("ev", 0),
+                "kelly_pct":    pos.get("kelly", 0),
+                "cost":         pos.get("cost", 0),
+                "opened_at":    pos.get("opened_at", ""),
+                "closed_at":    pos.get("closed_at", ""),
+                "close_reason": pos.get("close_reason", ""),
+            })
+
+    trades.sort(key=lambda t: t.get("opened_at") or t.get("closed_at") or "")
+
+    return {
+        "balance":          state.get("balance", 0.0),
+        "starting_balance": state.get("starting_balance", 0.0),
+        "wins":             state.get("wins", 0),
+        "losses":           state.get("losses", 0),
+        "total_trades":     state.get("total_trades", 0),
+        "peak_balance":     state.get("peak_balance", state.get("balance", 0.0)),
+        "positions":        positions,
+        "trades":           trades,
+    }
+
+
+@app.get("/retro", response_class=HTMLResponse)
+async def retro():
+    """Serve the retro terminal dashboard (sim_dashboard_report.html)."""
+    html_path = BASE_DIR / "sim_dashboard_report.html"
+    if not html_path.exists():
+        return HTMLResponse(content="sim_dashboard_report.html not found", status_code=404)
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
 # ---------------------------------------------------------------------------
 # WebSocket
 # ---------------------------------------------------------------------------

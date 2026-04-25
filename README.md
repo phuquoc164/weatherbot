@@ -72,6 +72,8 @@ Create `config.json` in the project root:
   "max_slippage": 0.03,
   "scan_interval": 3600,
   "calibration_min": 30,
+  "sigma_f": 2.0,
+  "sigma_c": 1.2,
   "vc_key": "YOUR_VISUAL_CROSSING_KEY"
 }
 ```

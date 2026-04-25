@@ -40,9 +40,8 @@ MAX_SLIPPAGE     = _cfg.get("max_slippage", 0.03)  # max allowed ask-bid spread
 SCAN_INTERVAL    = _cfg.get("scan_interval", 3600)   # every hour
 CALIBRATION_MIN  = _cfg.get("calibration_min", 30)
 VC_KEY           = _cfg.get("vc_key", "")
-
-SIGMA_F = 2.0
-SIGMA_C = 1.2
+SIGMA_F          = _cfg.get("sigma_f", 2.0)   # default forecast error for °F cities
+SIGMA_C          = _cfg.get("sigma_c", 1.2)   # default forecast error for °C cities
 
 DATA_DIR         = Path("data")
 DATA_DIR.mkdir(exist_ok=True)

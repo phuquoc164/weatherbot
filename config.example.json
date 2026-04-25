@@ -9,6 +9,8 @@
   "kelly_fraction": 0.25,
   "scan_interval": 3600,
   "calibration_min": 30,
+  "sigma_f": 2.0,
+  "sigma_c": 1.2,
   "vc_key": "YOUR_KEY_HERE",
   "max_slippage": 0.03
 }

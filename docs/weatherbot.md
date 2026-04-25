@@ -123,16 +123,11 @@ All parameters are loaded from `config.json` in the working directory. Missing k
 | `max_slippage` | `0.03` | Maximum allowed bid-ask spread at entry |
 | `scan_interval` | `3600` | Seconds between full scans (default: 1 hour) |
 | `calibration_min` | `30` | Minimum resolved markets before calibration updates sigma |
+| `sigma_f` | `2.0` | Default forecast uncertainty (°F) for US cities — overridden by calibration |
+| `sigma_c` | `1.2` | Default forecast uncertainty (°C) for non-US cities — overridden by calibration |
 | `vc_key` | `""` | Visual Crossing API key for historical actual-temperature lookup |
 
-Two sigma constants are hardcoded (not configurable):
-
-| Constant | Value | Role |
-|---|---|---|
-| `SIGMA_F` | `2.0` | Default forecast uncertainty for Fahrenheit markets |
-| `SIGMA_C` | `1.2` | Default forecast uncertainty for Celsius markets |
-
-These are overridden per city-source pair once calibration has enough data.
+`sigma_f` and `sigma_c` are the starting uncertainty values used in `bucket_prob` before enough calibration data has accumulated. Once a city-source pair has ≥ `calibration_min` resolved markets, the calibrated MAE replaces these defaults automatically.
 
 **Minimal `config.json` example:**
 
@@ -143,6 +138,8 @@ These are overridden per city-source pair once calibration has enough data.
   "min_ev": 0.10,
   "max_price": 0.45,
   "min_volume": 500,
+  "sigma_f": 2.0,
+  "sigma_c": 1.2,
   "vc_key": "YOUR_KEY_HERE"
 }
 ```

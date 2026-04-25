@@ -162,7 +162,7 @@ These are overridden per city-source pair once calibration has enough data.
 | `seattle` | Seattle | us | °F | KSEA |
 | `atlanta` | Atlanta | us | °F | KATL |
 | `london` | London | eu | °C | EGLC |
-| `paris` | Paris | eu | °C | LFPG |
+| `paris` | Paris | eu | °C | LFPB |
 | `munich` | Munich | eu | °C | EDDM |
 | `ankara` | Ankara | eu | °C | LTAC |
 | `seoul` | Seoul | asia | °C | RKSI |
@@ -201,11 +201,13 @@ These are overridden per city-source pair once calibration has enough data.
 - **Horizon:** D+0 only — current observed temperature, not a forecast
 - **API:** `https://aviationweather.gov/api/data/metar`
 - **Units:** Returns Celsius; converted to Fahrenheit for US stations
+- **Station source:** The station code is read from the market file's `station` field, which is set dynamically from Polymarket's `resolutionSource` at market creation. If Polymarket changes its resolution station, METAR automatically uses the new one on the next scan.
 
 ### Visual Crossing (actual temperatures)
 
-- **Purpose:** Fetches historical actual daily high temperature for resolved markets
-- **Coverage:** All cities (uses ICAO station code)
+- **Purpose:** Fetches the historical actual daily high temperature for a resolved market — used to populate `actual_temp` and feed the calibration system
+- **Coverage:** All cities (uses the station code resolved from Polymarket's `resolutionSource`)
+- **When called:** Immediately after `check_market_resolved()` confirms a market has closed
 - **Required:** `vc_key` must be set in `config.json`
 - **API:** `https://weather.visualcrossing.com/...`
 
@@ -406,11 +408,14 @@ The calibration system refines the `sigma` uncertainty parameter for each city-s
 
 **How it works:**
 
-1. After each full scan, the number of resolved markets is checked.
-2. If the total ≥ `CALIBRATION_MIN` (default 30), `run_calibration()` runs.
-3. For each `(city, source)` pair, it collects the absolute errors `|forecast − actual|` across all resolved markets.
-4. If a pair has ≥ `CALIBRATION_MIN` samples, its MAE becomes the new `sigma`.
-5. If fewer samples exist, the pair keeps the hardcoded default (`SIGMA_F` or `SIGMA_C`).
+1. When a market resolves, `get_actual_temp()` is called immediately and the result is stored as `actual_temp` in the market file.
+2. After each full scan, the number of resolved markets with a non-null `actual_temp` is checked.
+3. If the total ≥ `CALIBRATION_MIN` (default 30), `run_calibration()` runs.
+4. For each `(city, source)` pair, it collects the absolute errors `|forecast − actual|` across all resolved markets.
+5. If a pair has ≥ `CALIBRATION_MIN` samples, its MAE becomes the new `sigma`.
+6. If fewer samples exist, the pair keeps the hardcoded default (`SIGMA_F` or `SIGMA_C`).
+
+The `actual_temp` is fetched from Visual Crossing using the station code resolved from Polymarket's `resolutionSource`, ensuring calibration data matches what Polymarket actually resolved against.
 
 The calibrated sigma is used in `bucket_prob` for edge buckets — a smaller sigma means the bot is more confident in the forecast, leading to more aggressive bets on edge buckets.
 
@@ -615,6 +620,7 @@ mypy weatherbot.py
 |---|---|
 | `get_polymarket_event(city_slug, month, day, year)` | Fetches event by canonical slug |
 | `get_market_price(market_id)` | Current YES price for a single market |
+| `parse_resolution_station(url)` | Extracts ICAO station code from a Wunderground resolution URL |
 | `parse_temp_range(question)` | Parses question text into `(t_low, t_high)` |
 | `hours_to_resolution(end_date_str)` | Floating-point hours until market closes |
 | `in_bucket(forecast, t_low, t_high)` | True if forecast is within the temperature range |

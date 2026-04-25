@@ -43,6 +43,13 @@ VC_KEY           = _cfg.get("vc_key", "")
 SIGMA_F          = _cfg.get("sigma_f", 2.0)   # default forecast error for °F cities
 SIGMA_C          = _cfg.get("sigma_c", 1.2)   # default forecast error for °C cities
 
+# --- Strategy flags (all off by default; flip in config.json to test) ---
+_strat           = _cfg.get("strategy", {})
+STRAT_PROB_MODEL = _strat.get("prob_model_normal_cdf", False)   # improvement #1
+STRAT_TIME_DECAY = _strat.get("time_decay", False)              # improvement #3
+STRAT_DYNAMIC_EV = _strat.get("dynamic_min_ev", False)          # improvement #6
+SIGMA_REF        = _strat.get("sigma_ref", 2.0)                 # reference sigma for dynamic EV scaling
+
 DATA_DIR         = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 STATE_FILE       = DATA_DIR / "state.json"
@@ -97,12 +104,14 @@ def norm_cdf(x):
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 def bucket_prob(forecast, t_low, t_high, sigma=None):
-    """For regular buckets — exact match. For edge buckets — normal distribution."""
+    """For edge buckets — normal CDF. Interior buckets: normal CDF if STRAT_PROB_MODEL, else binary."""
     s = sigma or 2.0
     if t_low == -999:
         return norm_cdf((t_high - float(forecast)) / s)
     if t_high == 999:
         return 1.0 - norm_cdf((t_low - float(forecast)) / s)
+    if STRAT_PROB_MODEL:
+        return norm_cdf((t_high - float(forecast)) / s) - norm_cdf((t_low - float(forecast)) / s)
     return 1.0 if in_bucket(forecast, t_low, t_high) else 0.0
 
 def calc_ev(p, price):
@@ -115,8 +124,11 @@ def calc_kelly(p, price):
     f = (p * b - (1.0 - p)) / b
     return round(min(max(0.0, f) * KELLY_FRACTION, 1.0), 4)
 
-def bet_size(kelly, balance):
-    raw = kelly * balance
+_HORIZON_MULT = {0: 1.0, 1: 0.8, 2: 0.6, 3: 0.4}
+
+def bet_size(kelly, balance, horizon_days=None):
+    multiplier = _HORIZON_MULT.get(horizon_days, 1.0) if STRAT_TIME_DECAY and horizon_days is not None else 1.0
+    raw = kelly * balance * multiplier
     return round(min(raw, MAX_BET), 2)
 
 # =============================================================================
@@ -663,9 +675,10 @@ def scan_and_update():
                     if volume >= MIN_VOLUME:
                         p  = bucket_prob(forecast_temp, t_low, t_high, sigma)
                         ev = calc_ev(p, ask)
-                        if ev >= MIN_EV:
+                        effective_min_ev = MIN_EV * max(1.0, sigma / SIGMA_REF) if STRAT_DYNAMIC_EV else MIN_EV
+                        if ev >= effective_min_ev:
                             kelly = calc_kelly(p, ask)
-                            size  = bet_size(kelly, balance)
+                            size  = bet_size(kelly, balance, horizon_days=i)
                             if size >= 0.50:
                                 best_signal = {
                                     "market_id":    o["market_id"],

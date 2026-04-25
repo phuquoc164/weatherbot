@@ -74,7 +74,13 @@ Create `config.json` in the project root:
   "calibration_min": 30,
   "sigma_f": 2.0,
   "sigma_c": 1.2,
-  "vc_key": "YOUR_VISUAL_CROSSING_KEY"
+  "vc_key": "YOUR_VISUAL_CROSSING_KEY",
+  "strategy": {
+    "prob_model_normal_cdf": false,
+    "time_decay": false,
+    "dynamic_min_ev": false,
+    "sigma_ref": 2.0
+  }
 }
 ```
 
@@ -171,6 +177,7 @@ Terminal 2:  venv/bin/python dashboard.py     # both dashboards
 - **Slippage filter** — skips markets with spread > `max_slippage`
 - **Self-calibration** — learns forecast accuracy (sigma) per city/source over time
 - **Dynamic resolution station** — reads Polymarket's `resolutionSource` field on each new market, auto-corrects the station if Polymarket changes it
+- **Strategy flags** — optional improvements in `config.json` under a `"strategy"` key: probabilistic bucket probability (`prob_model_normal_cdf`), horizon-based time-decay bet sizing (`time_decay`), dynamic EV threshold scaling (`dynamic_min_ev`)
 
 ---
 

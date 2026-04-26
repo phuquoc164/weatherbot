@@ -200,7 +200,7 @@ def run_calibration(markets):
 # =============================================================================
 
 def get_ecmwf(city_slug, dates):
-    """ECMWF via Open-Meteo with bias correction. For all cities."""
+    """ECMWF via Open-Meteo with bias correction. Returns {date: {"max": v, "min": v}}."""
     loc = LOCATIONS[city_slug]
     unit = loc["unit"]
     temp_unit = "fahrenheit" if unit == "F" else "celsius"
@@ -208,7 +208,7 @@ def get_ecmwf(city_slug, dates):
     url = (
         f"https://api.open-meteo.com/v1/forecast"
         f"?latitude={loc['lat']}&longitude={loc['lon']}"
-        f"&daily=temperature_2m_max&temperature_unit={temp_unit}"
+        f"&daily=temperature_2m_max,temperature_2m_min&temperature_unit={temp_unit}"
         f"&forecast_days=7&timezone={TIMEZONES.get(city_slug, 'UTC')}"
         f"&models=ecmwf_ifs025&bias_correction=true"
     )
@@ -216,9 +216,17 @@ def get_ecmwf(city_slug, dates):
         try:
             data = requests.get(url, timeout=(5, 10)).json()
             if "error" not in data:
-                for date, temp in zip(data["daily"]["time"], data["daily"]["temperature_2m_max"]):
-                    if date in dates and temp is not None:
-                        result[date] = round(temp, 1) if unit == "C" else round(temp)
+                daily = data["daily"]
+                for date, t_max, t_min in zip(
+                    daily["time"],
+                    daily["temperature_2m_max"],
+                    daily["temperature_2m_min"],
+                ):
+                    if date not in dates:
+                        continue
+                    def _round(v):
+                        return (round(v, 1) if unit == "C" else round(v)) if v is not None else None
+                    result[date] = {"max": _round(t_max), "min": _round(t_min)}
             break
         except Exception as e:
             if attempt < 2:
@@ -228,7 +236,7 @@ def get_ecmwf(city_slug, dates):
     return result
 
 def get_hrrr(city_slug, dates):
-    """HRRR via Open-Meteo. US cities only, up to 48h horizon."""
+    """HRRR/GFS via Open-Meteo. US cities only, up to 48h horizon. Returns {date: {"max": v, "min": v}}."""
     loc = LOCATIONS[city_slug]
     if loc["region"] != "us":
         return {}
@@ -236,7 +244,7 @@ def get_hrrr(city_slug, dates):
     url = (
         f"https://api.open-meteo.com/v1/forecast"
         f"?latitude={loc['lat']}&longitude={loc['lon']}"
-        f"&daily=temperature_2m_max&temperature_unit=fahrenheit"
+        f"&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit"
         f"&forecast_days=3&timezone={TIMEZONES.get(city_slug, 'UTC')}"
         f"&models=gfs_seamless"  # HRRR+GFS seamless — best option for US
     )
@@ -244,9 +252,18 @@ def get_hrrr(city_slug, dates):
         try:
             data = requests.get(url, timeout=(5, 10)).json()
             if "error" not in data:
-                for date, temp in zip(data["daily"]["time"], data["daily"]["temperature_2m_max"]):
-                    if date in dates and temp is not None:
-                        result[date] = round(temp)
+                daily = data["daily"]
+                for date, t_max, t_min in zip(
+                    daily["time"],
+                    daily["temperature_2m_max"],
+                    daily["temperature_2m_min"],
+                ):
+                    if date not in dates:
+                        continue
+                    result[date] = {
+                        "max": round(t_max) if t_max is not None else None,
+                        "min": round(t_min) if t_min is not None else None,
+                    }
             break
         except Exception as e:
             if attempt < 2:
@@ -256,7 +273,7 @@ def get_hrrr(city_slug, dates):
     return result
 
 def get_metar(city_slug):
-    """Current observed temperature from METAR station. D+0 only."""
+    """Current observed temperature from METAR station. D+0 highest markets only."""
     loc = LOCATIONS[city_slug]
     station = loc["station"]
     unit = loc["unit"]
@@ -271,6 +288,38 @@ def get_metar(city_slug):
                 return round(float(temp_c), 1)
     except Exception as e:
         print(f"  [METAR] {city_slug}: {e}")
+    return None
+
+def _metar_local_date(obs: dict, tz: str) -> str:
+    """Convert a METAR observation's obsTime (epoch seconds) to a local date string."""
+    epoch = obs.get("obsTime")
+    if epoch is None:
+        return ""
+    dt = datetime.fromtimestamp(int(epoch), tz=ZoneInfo(tz))
+    return dt.strftime("%Y-%m-%d")
+
+def get_metar_min(city_slug: str, date_str: str):
+    """Lowest METAR-observed temperature over the local-day window for D+0 lowest markets."""
+    loc = LOCATIONS[city_slug]
+    station = loc["station"]
+    unit = loc["unit"]
+    tz = TIMEZONES.get(city_slug, "UTC")
+    try:
+        url = f"https://aviationweather.gov/api/data/metar?ids={station}&format=json&hours=24"
+        data = requests.get(url, timeout=(5, 8)).json()
+        if not isinstance(data, list) or not data:
+            return None
+        temps_c = [
+            float(obs["temp"])
+            for obs in data
+            if _metar_local_date(obs, tz) == date_str and obs.get("temp") is not None
+        ]
+        if not temps_c:
+            return None
+        min_c = min(temps_c)
+        return round(min_c * 9/5 + 32) if unit == "F" else round(min_c, 1)
+    except Exception as e:
+        print(f"  [METAR-MIN] {city_slug}: {e}")
     return None
 
 def get_actual_temp(city_slug, date_str):
@@ -496,32 +545,50 @@ def calculate_balance_from_trades():
 # =============================================================================
 
 def take_forecast_snapshot(city_slug, dates):
-    """Fetches forecasts from all sources and returns a snapshot."""
-    now_str = datetime.now(timezone.utc).isoformat()
-    ecmwf   = get_ecmwf(city_slug, dates)
-    hrrr    = get_hrrr(city_slug, dates)
-    today   = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    """Fetches forecasts from all sources. Returns {date: {"highest": snap, "lowest": snap}}."""
+    now_str  = datetime.now(timezone.utc).isoformat()
+    ecmwf    = get_ecmwf(city_slug, dates)
+    hrrr     = get_hrrr(city_slug, dates)
+    today    = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cutoff_2 = (datetime.now(timezone.utc) + timedelta(days=2)).strftime("%Y-%m-%d")
+    loc      = LOCATIONS[city_slug]
+
+    metar_max = get_metar(city_slug) if today in dates else None
+    metar_min = get_metar_min(city_slug, today) if today in dates else None
 
     snapshots = {}
     for date in dates:
-        snap = {
-            "ts":    now_str,
-            "ecmwf": ecmwf.get(date),
-            "hrrr":  hrrr.get(date) if date <= (datetime.now(timezone.utc) + timedelta(days=2)).strftime("%Y-%m-%d") else None,
-            "metar": get_metar(city_slug) if date == today else None,
-        }
-        # Best forecast: HRRR for US D+0/D+1, otherwise ECMWF
-        loc = LOCATIONS[city_slug]
-        if loc["region"] == "us" and snap["hrrr"] is not None:
-            snap["best"] = snap["hrrr"]
-            snap["best_source"] = "hrrr"
-        elif snap["ecmwf"] is not None:
-            snap["best"] = snap["ecmwf"]
-            snap["best_source"] = "ecmwf"
-        else:
-            snap["best"] = None
-            snap["best_source"] = None
-        snapshots[date] = snap
+        ecmwf_day = ecmwf.get(date, {})
+        hrrr_day  = hrrr.get(date, {}) if date <= cutoff_2 else {}
+
+        t_max = ecmwf_day.get("max")
+        t_min = ecmwf_day.get("min")
+        if t_max is not None and t_min is not None and t_max < t_min:
+            print(f"  [WARN] {city_slug} {date}: max ({t_max}) < min ({t_min}), skipping both")
+            t_max = t_min = None
+            ecmwf_day = {}
+            hrrr_day  = {}
+
+        date_snaps = {}
+        for market_type in MARKET_TYPES:
+            extreme = "max" if market_type == "highest" else "min"
+            ecmwf_v = ecmwf_day.get(extreme)
+            hrrr_v  = hrrr_day.get(extreme)
+            metar_v = (metar_max if market_type == "highest" else metar_min) if date == today else None
+
+            snap = {"ts": now_str, "ecmwf": ecmwf_v, "hrrr": hrrr_v, "metar": metar_v}
+            if loc["region"] == "us" and hrrr_v is not None:
+                snap["best"] = hrrr_v
+                snap["best_source"] = "hrrr"
+            elif ecmwf_v is not None:
+                snap["best"] = ecmwf_v
+                snap["best_source"] = "ecmwf"
+            else:
+                snap["best"] = None
+                snap["best_source"] = None
+            date_snaps[market_type] = snap
+
+        snapshots[date] = date_snaps
     return snapshots
 
 def scan_and_update():
@@ -597,8 +664,8 @@ def scan_and_update():
             outcomes.sort(key=lambda x: x["range"][0])
             mkt["all_outcomes"] = outcomes
 
-            # Forecast snapshot
-            snap = snapshots.get(date, {})
+            # Forecast snapshot — use highest type until scan_and_update is fully updated
+            snap = snapshots.get(date, {}).get("highest", {})
             forecast_snap = {
                 "ts":          snap.get("ts"),
                 "horizon":     horizon,

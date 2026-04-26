@@ -141,40 +141,54 @@ def bet_size(kelly, balance, horizon_days=None):
 _cal: dict = {}
 
 def load_cal():
-    if CALIBRATION_FILE.exists():
-        return json.loads(CALIBRATION_FILE.read_text(encoding="utf-8"))
-    return {}
+    if not CALIBRATION_FILE.exists():
+        return {}
+    raw = json.loads(CALIBRATION_FILE.read_text(encoding="utf-8"))
+    migrated = {}
+    n_migrated = 0
+    for k, v in raw.items():
+        if k.count("_") == 1:  # legacy 2-segment key: city_source
+            migrated[f"{k}_highest"] = v
+            n_migrated += 1
+        else:
+            migrated[k] = v
+    if n_migrated:
+        CALIBRATION_FILE.write_text(json.dumps(migrated, indent=2), encoding="utf-8")
+        print(f"  [MIGRATE] cal: {n_migrated} keys updated to 3-segment format")
+    return migrated
 
-def get_sigma(city_slug, source="ecmwf"):
-    key = f"{city_slug}_{source}"
+def get_sigma(city_slug, source="ecmwf", market_type="highest"):
+    key = f"{city_slug}_{source}_{market_type}"
     if key in _cal:
         return _cal[key]["sigma"]
     return SIGMA_F if LOCATIONS[city_slug]["unit"] == "F" else SIGMA_C
 
 def run_calibration(markets):
-    """Recalculates sigma from resolved markets."""
+    """Recalculates sigma from resolved markets, keyed by (city, source, market_type)."""
     resolved = [m for m in markets if m.get("resolved") and m.get("actual_temp") is not None]
     cal = load_cal()
     updated = []
 
-    for source in ["ecmwf", "hrrr", "metar"]:
-        for city in set(m["city"] for m in resolved):
-            group = [m for m in resolved if m["city"] == city]
-            errors = []
-            for m in group:
-                snap = next((s for s in reversed(m.get("forecast_snapshots", []))
-                             if s["source"] == source), None)
-                if snap and snap.get("temp") is not None:
-                    errors.append(abs(snap["temp"] - m["actual_temp"]))
-            if len(errors) < CALIBRATION_MIN:
-                continue
-            mae  = sum(errors) / len(errors)
-            key  = f"{city}_{source}"
-            old  = cal.get(key, {}).get("sigma", SIGMA_F if LOCATIONS[city]["unit"] == "F" else SIGMA_C)
-            new  = round(mae, 3)
-            cal[key] = {"sigma": new, "n": len(errors), "updated_at": datetime.now(timezone.utc).isoformat()}
-            if abs(new - old) > 0.05:
-                updated.append(f"{LOCATIONS[city]['name']} {source}: {old:.2f}->{new:.2f}")
+    for market_type in MARKET_TYPES:
+        type_resolved = [m for m in resolved if m.get("type", "highest") == market_type]
+        for source in ["ecmwf", "hrrr", "metar"]:
+            for city in set(m["city"] for m in type_resolved):
+                group = [m for m in type_resolved if m["city"] == city]
+                errors = []
+                for m in group:
+                    snap = next((s for s in reversed(m.get("forecast_snapshots", []))
+                                 if s["source"] == source), None)
+                    if snap and snap.get("temp") is not None:
+                        errors.append(abs(snap["temp"] - m["actual_temp"]))
+                if len(errors) < CALIBRATION_MIN:
+                    continue
+                mae  = sum(errors) / len(errors)
+                key  = f"{city}_{source}_{market_type}"
+                old  = cal.get(key, {}).get("sigma", SIGMA_F if LOCATIONS[city]["unit"] == "F" else SIGMA_C)
+                new  = round(mae, 3)
+                cal[key] = {"sigma": new, "n": len(errors), "updated_at": datetime.now(timezone.utc).isoformat()}
+                if abs(new - old) > 0.05:
+                    updated.append(f"{LOCATIONS[city]['name']} {source} [{market_type}]: {old:.2f}->{new:.2f}")
 
     CALIBRATION_FILE.write_text(json.dumps(cal, indent=2), encoding="utf-8")
     if updated:

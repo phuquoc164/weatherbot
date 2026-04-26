@@ -28,7 +28,11 @@
     function buildMarkerHtml(city, loc, forecasts, positions) {
         const code = city.toUpperCase().slice(0, 3);
         const forecast = forecasts.find(f => f.city === city);
-        const position = positions.find(p => p.city === city);
+        // When city has both HI and LO positions, show the one with higher EV
+        const cityPositions = positions.filter(p => p.city === city);
+        const position = cityPositions.length > 1
+            ? cityPositions.reduce((a, b) => (a.ev || 0) >= (b.ev || 0) ? a : b)
+            : cityPositions[0];
 
         let temp = "";
         let evText = "";
@@ -53,7 +57,7 @@
 
     function buildPopupHtml(city, loc, forecasts, positions) {
         const forecast = forecasts.find(f => f.city === city);
-        const position = positions.find(p => p.city === city);
+        const cityPositions = positions.filter(p => p.city === city);
 
         let html = `<div class="popup-detail">`;
         html += `<div style="font-weight:600;font-size:13px;margin-bottom:4px;">${loc.name}</div>`;
@@ -65,8 +69,12 @@
             html += `<div class="value">Horizon: ${forecast.horizon || "—"} | Date: ${forecast.date || "—"}</div>`;
         }
 
-        if (position) {
-            html += `<div class="label" style="margin-top:6px;">Position</div>`;
+        for (const position of cityPositions) {
+            const isLo  = position.market_type === "lowest";
+            const badge = isLo
+                ? `<span class="badge badge-lo">LO</span>`
+                : `<span class="badge badge-hi">HI</span>`;
+            html += `<div class="label" style="margin-top:6px;">${badge} Position</div>`;
             html += `<div class="value">Bucket: ${position.bucket_low}-${position.bucket_high}°${position.unit}</div>`;
             html += `<div class="value">Entry: $${position.entry_price?.toFixed(3)} | Cost: $${position.cost?.toFixed(0)}</div>`;
             html += `<div class="value">EV: +${position.ev?.toFixed(2)} | Kelly: ${position.kelly?.toFixed(2)} | σ: ${position.sigma?.toFixed(1)}</div>`;
@@ -193,20 +201,31 @@
         let html = "";
         for (const [key, loc] of Object.entries(locations)) {
             const forecast = forecasts.find(f => f.city === key);
-            const position = positions.find(p => p.city === key);
+            const cityPositions = positions.filter(p => p.city === key);
+            const hiPos = cityPositions.find(p => p.market_type !== "lowest");
+            const loPos = cityPositions.find(p => p.market_type === "lowest");
+            const anyPos = hiPos || loPos;
 
             let statusClass = "";
-            if (position) {
-                statusClass = (position.pnl || 0) >= 0 ? "profitable" : "losing";
+            if (anyPos) {
+                const totalPnl = cityPositions.reduce((s, p) => s + (p.pnl || 0), 0);
+                statusClass = totalPnl >= 0 ? "profitable" : "losing";
             }
 
             const temp = forecast ? `${forecast.best}°${forecast.unit}` : "—";
-            const bucket = position ? `${position.bucket_low}-${position.bucket_high}` : "—";
-            const price = position ? `$${position.entry_price.toFixed(2)}` : "—";
+            let bucketStr = "—";
+            if (hiPos && loPos) {
+                bucketStr = `[HI] ${hiPos.bucket_low}-${hiPos.bucket_high} / [LO] ${loPos.bucket_low}-${loPos.bucket_high}`;
+            } else if (hiPos) {
+                bucketStr = `[HI] ${hiPos.bucket_low}-${hiPos.bucket_high}`;
+            } else if (loPos) {
+                bucketStr = `[LO] ${loPos.bucket_low}-${loPos.bucket_high}`;
+            }
+            const price = anyPos ? `$${anyPos.entry_price.toFixed(2)}` : "—";
 
             html += `<div class="city-card ${statusClass}">` +
                 `<div class="city-code">${key.toUpperCase().slice(0, 3)}</div>` +
-                `<div class="city-detail">${temp} → ${bucket} @ ${price}</div>` +
+                `<div class="city-detail">${temp} → ${bucketStr} @ ${price}</div>` +
                 `</div>`;
         }
         container.innerHTML = html;
@@ -256,9 +275,13 @@
             const pnlSign = pnl >= 0 ? "+" : "";
             const pnlText = pnlSign + "$" + pnl.toFixed(2);
             const curPrice = p.current_price ? "$" + p.current_price.toFixed(3) : "—";
+            const isLo    = p.market_type === "lowest";
+            const badge   = isLo
+                ? `<span class="badge badge-lo">LO</span>`
+                : `<span class="badge badge-hi">HI</span>`;
 
             html += `<div class="table-row">` +
-                `<span>${p.city.toUpperCase().slice(0, 3)}</span>` +
+                `<span>${badge} ${p.city.toUpperCase().slice(0, 3)}</span>` +
                 `<span>${p.bucket_low}-${p.bucket_high}°${p.unit}</span>` +
                 `<span>$${p.entry_price.toFixed(3)} → ${curPrice}</span>` +
                 `<span class="text-green">+${p.ev.toFixed(2)}</span>` +
@@ -338,10 +361,14 @@
             const pnl = t.pnl ?? 0;
             const pnlClass = pnl >= 0 ? "text-green" : "text-red";
             const pnlSign = pnl >= 0 ? "+" : "";
-            const reason = t.close_reason || "unknown";
+            const reason  = t.close_reason || "unknown";
+            const isLo    = t.market_type === "lowest";
+            const badge   = isLo
+                ? `<span class="badge badge-lo">LO</span>`
+                : `<span class="badge badge-hi">HI</span>`;
 
             html += `<div class="history-row">` +
-                `<span>${t.city_name}</span>` +
+                `<span>${badge} ${t.city_name}</span>` +
                 `<span>${t.date}</span>` +
                 `<span>$${t.entry_price.toFixed(3)} → $${t.exit_price.toFixed(3)}</span>` +
                 `<span class="reason-badge reason-${reason}">${reason}</span>` +

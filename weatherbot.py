@@ -322,22 +322,23 @@ def get_metar_min(city_slug: str, date_str: str):
         print(f"  [METAR-MIN] {city_slug}: {e}")
     return None
 
-def get_actual_temp(city_slug, date_str):
+def get_actual_temp(city_slug, date_str, market_type="highest"):
     """Actual temperature via Visual Crossing for closed markets."""
     loc = LOCATIONS[city_slug]
     station = loc["station"]
     unit = loc["unit"]
     vc_unit = "us" if unit == "F" else "metric"
+    element = "tempmax" if market_type == "highest" else "tempmin"
     url = (
         f"https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
         f"/{station}/{date_str}/{date_str}"
-        f"?unitGroup={vc_unit}&key={VC_KEY}&include=days&elements=tempmax"
+        f"?unitGroup={vc_unit}&key={VC_KEY}&include=days&elements={element}"
     )
     try:
         data = requests.get(url, timeout=(5, 8)).json()
         days = data.get("days", [])
-        if days and days[0].get("tempmax") is not None:
-            return round(float(days[0]["tempmax"]), 1)
+        if days and days[0].get(element) is not None:
+            return round(float(days[0][element]), 1)
     except Exception as e:
         print(f"  [VC] {city_slug} {date_str}: {e}")
     return None
@@ -369,8 +370,9 @@ def check_market_resolved(market_id):
 # POLYMARKET
 # =============================================================================
 
-def get_polymarket_event(city_slug, month, day, year):
-    slug = f"highest-temperature-in-{city_slug}-on-{month}-{day}-{year}"
+def get_polymarket_event(city_slug, month, day, year, market_type="highest"):
+    prefix = "highest-temperature" if market_type == "highest" else "lowest-temperature"
+    slug = f"{prefix}-in-{city_slug}-on-{month}-{day}-{year}"
     try:
         r = requests.get(f"https://gamma-api.polymarket.com/events?slug={slug}", timeout=(5, 8))
         data = r.json()

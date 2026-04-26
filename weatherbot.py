@@ -546,6 +546,14 @@ def calculate_balance_from_trades():
 # CORE LOGIC
 # =============================================================================
 
+def _buckets_are_consistent(hi_low, hi_high, lo_low, lo_high):
+    """Return True if the highest/lowest bucket pair is physically possible.
+
+    The daily high must be >= the daily low, so the high bucket must not
+    sit entirely below the low bucket.
+    """
+    return hi_high >= lo_low
+
 def take_forecast_snapshot(city_slug, dates):
     """Fetches forecasts from all sources. Returns {date: {"highest": snap, "lowest": snap}}."""
     now_str  = datetime.now(timezone.utc).isoformat()

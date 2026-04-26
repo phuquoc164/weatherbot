@@ -625,238 +625,257 @@ def scan_and_update():
             continue
 
         for i, date in enumerate(dates):
-            dt    = datetime.strptime(date, "%Y-%m-%d")
-            event = get_polymarket_event(city_slug, MONTHS[dt.month - 1], dt.day, dt.year)
-            if not event:
-                continue
+            dt      = datetime.strptime(date, "%Y-%m-%d")
+            horizon = f"D+{i}"
 
-            end_date = event.get("endDate", "")
-            hours    = hours_to_resolution(end_date) if end_date else 0
-            horizon  = f"D+{i}"
-
-            # Load or create market record
-            mkt = load_market(city_slug, date)
-            if mkt is None:
-                if hours < MIN_HOURS or hours > MAX_HOURS:
+            for market_type in MARKET_TYPES:
+                event = get_polymarket_event(city_slug, MONTHS[dt.month - 1], dt.day, dt.year, market_type)
+                if not event:
                     continue
-                mkt = new_market(city_slug, date, event, hours)
 
-            # Skip if market already resolved
-            if mkt["status"] == "resolved":
-                continue
+                end_date = event.get("endDate", "")
+                hours    = hours_to_resolution(end_date) if end_date else 0
 
-            # Update outcomes list — prices taken directly from event
-            outcomes = []
-            for market in event.get("markets", []):
-                question = market.get("question", "")
-                mid      = str(market.get("id", ""))
-                volume   = float(market.get("volume", 0))
-                rng      = parse_temp_range(question)
-                if not rng:
+                # Load or create market record
+                mkt = load_market(city_slug, date, market_type)
+                if mkt is None:
+                    if hours < MIN_HOURS or hours > MAX_HOURS:
+                        continue
+                    mkt = new_market(city_slug, date, event, hours, market_type)
+
+                # Skip if market already resolved
+                if mkt["status"] == "resolved":
                     continue
-                try:
-                    prices = json.loads(market.get("outcomePrices", "[0.5,0.5]"))
-                    bid = float(prices[0])
-                    ask = float(prices[1]) if len(prices) > 1 else bid
-                except Exception:
-                    continue
-                outcomes.append({
-                    "question":  question,
-                    "market_id": mid,
-                    "range":     rng,
-                    "bid":       round(bid, 4),
-                    "ask":       round(ask, 4),
-                    "price":     round(bid, 4),   # for compatibility
-                    "spread":    round(ask - bid, 4),
-                    "volume":    round(volume, 0),
-                })
 
-            outcomes.sort(key=lambda x: x["range"][0])
-            mkt["all_outcomes"] = outcomes
+                # Update outcomes list — prices taken directly from event
+                outcomes = []
+                for market in event.get("markets", []):
+                    question = market.get("question", "")
+                    mid      = str(market.get("id", ""))
+                    volume   = float(market.get("volume", 0))
+                    rng      = parse_temp_range(question)
+                    if not rng:
+                        continue
+                    try:
+                        prices = json.loads(market.get("outcomePrices", "[0.5,0.5]"))
+                        bid = float(prices[0])
+                        ask = float(prices[1]) if len(prices) > 1 else bid
+                    except Exception:
+                        continue
+                    outcomes.append({
+                        "question":  question,
+                        "market_id": mid,
+                        "range":     rng,
+                        "bid":       round(bid, 4),
+                        "ask":       round(ask, 4),
+                        "price":     round(bid, 4),   # for compatibility
+                        "spread":    round(ask - bid, 4),
+                        "volume":    round(volume, 0),
+                    })
 
-            # Forecast snapshot — use highest type until scan_and_update is fully updated
-            snap = snapshots.get(date, {}).get("highest", {})
-            forecast_snap = {
-                "ts":          snap.get("ts"),
-                "horizon":     horizon,
-                "hours_left":  round(hours, 1),
-                "ecmwf":       snap.get("ecmwf"),
-                "hrrr":        snap.get("hrrr"),
-                "metar":       snap.get("metar"),
-                "best":        snap.get("best"),
-                "best_source": snap.get("best_source"),
-            }
-            mkt["forecast_snapshots"].append(forecast_snap)
+                outcomes.sort(key=lambda x: x["range"][0])
+                mkt["all_outcomes"] = outcomes
 
-            # Market price snapshot
-            top = max(outcomes, key=lambda x: x["price"]) if outcomes else None
-            market_snap = {
-                "ts":       snap.get("ts"),
-                "top_bucket": f"{top['range'][0]}-{top['range'][1]}{unit_sym}" if top else None,
-                "top_price":  top["price"] if top else None,
-            }
-            mkt["market_snapshots"].append(market_snap)
+                snap = snapshots.get(date, {}).get(market_type, {})
+                forecast_snap = {
+                    "ts":          snap.get("ts"),
+                    "horizon":     horizon,
+                    "hours_left":  round(hours, 1),
+                    "ecmwf":       snap.get("ecmwf"),
+                    "hrrr":        snap.get("hrrr"),
+                    "metar":       snap.get("metar"),
+                    "best":        snap.get("best"),
+                    "best_source": snap.get("best_source"),
+                }
+                mkt["forecast_snapshots"].append(forecast_snap)
 
-            forecast_temp = snap.get("best")
-            best_source   = snap.get("best_source")
+                # Market price snapshot
+                top = max(outcomes, key=lambda x: x["price"]) if outcomes else None
+                market_snap = {
+                    "ts":         snap.get("ts"),
+                    "top_bucket": f"{top['range'][0]}-{top['range'][1]}{unit_sym}" if top else None,
+                    "top_price":  top["price"] if top else None,
+                }
+                mkt["market_snapshots"].append(market_snap)
 
-            # --- STOP-LOSS AND TRAILING STOP ---
-            if mkt.get("position") and mkt["position"].get("status") == "open":
-                pos = mkt["position"]
-                current_price = None
-                for o in outcomes:
-                    if o["market_id"] == pos["market_id"]:
-                        current_price = o["price"]
-                        break
+                forecast_temp = snap.get("best")
+                best_source   = snap.get("best_source")
 
-                if current_price is not None:
-                    current_price = o.get("bid", current_price)  # sell at bid
-                    entry = pos["entry_price"]
-                    stop  = pos.get("stop_price", entry * 0.80)  # 20% stop by default
-
-                    # Progressive trailing stop
-                    if current_price >= entry * 1.20:
-                        if not pos.get("trailing_activated"):
-                            new_stop = entry  # first activation: breakeven
-                            pos["trailing_activated"] = True
-                        else:
-                            new_stop = round(current_price * 0.80, 4)  # 80% of current
-                        if new_stop > stop:
-                            pos["stop_price"] = new_stop
-
-                    # Check stop
-                    if current_price <= stop:
-                        pnl = round((current_price - entry) * pos["shares"], 2)
-                        balance += pos["cost"] + pnl
-                        pos["closed_at"]    = snap.get("ts")
-                        pos["close_reason"] = "stop_loss" if current_price < entry else "trailing_stop"
-                        pos["exit_price"]   = current_price
-                        pos["pnl"]          = pnl
-                        pos["status"]       = "closed"
-                        closed += 1
-                        reason = "STOP" if current_price < entry else "TRAILING BE"
-                        print(f"  [{reason}] {loc['name']} {date} | entry ${entry:.3f} exit ${current_price:.3f} | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
-
-            # --- CLOSE POSITION if forecast shifted 2+ degrees ---
-            if mkt.get("position") and forecast_temp is not None:
-                pos = mkt["position"]
-                old_bucket_low  = pos["bucket_low"]
-                old_bucket_high = pos["bucket_high"]
-                # 2-degree buffer — avoid closing on small forecast fluctuations
-                unit = loc["unit"]
-                buffer = 2.0 if unit == "F" else 1.0
-                mid_bucket = (old_bucket_low + old_bucket_high) / 2 if old_bucket_low != -999 and old_bucket_high != 999 else forecast_temp
-                forecast_far = abs(forecast_temp - mid_bucket) > (abs(mid_bucket - old_bucket_low) + buffer)
-                if not in_bucket(forecast_temp, old_bucket_low, old_bucket_high) and forecast_far:
+                # --- STOP-LOSS AND TRAILING STOP ---
+                if mkt.get("position") and mkt["position"].get("status") == "open":
+                    pos = mkt["position"]
                     current_price = None
                     for o in outcomes:
                         if o["market_id"] == pos["market_id"]:
                             current_price = o["price"]
                             break
+
                     if current_price is not None:
-                        pnl = round((current_price - pos["entry_price"]) * pos["shares"], 2)
-                        balance += pos["cost"] + pnl
-                        mkt["position"]["closed_at"]    = snap.get("ts")
-                        mkt["position"]["close_reason"] = "forecast_changed"
-                        mkt["position"]["exit_price"]   = current_price
-                        mkt["position"]["pnl"]          = pnl
-                        mkt["position"]["status"]       = "closed"
-                        closed += 1
-                        print(f"  [CLOSE] {loc['name']} {date} — forecast changed | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
+                        current_price = o.get("bid", current_price)  # sell at bid
+                        entry = pos["entry_price"]
+                        stop  = pos.get("stop_price", entry * 0.80)  # 20% stop by default
 
-            # --- OPEN POSITION ---
-            if not mkt.get("position") and forecast_temp is not None and hours >= MIN_HOURS:
-                sigma = get_sigma(city_slug, best_source or "ecmwf")
-                best_signal = None
+                        # Progressive trailing stop
+                        if current_price >= entry * 1.20:
+                            if not pos.get("trailing_activated"):
+                                new_stop = entry  # first activation: breakeven
+                                pos["trailing_activated"] = True
+                            else:
+                                new_stop = round(current_price * 0.80, 4)  # 80% of current
+                            if new_stop > stop:
+                                pos["stop_price"] = new_stop
 
-                # Find exactly ONE bucket that matches the forecast
-                # If forecast doesn't fit any bucket cleanly — skip this market
-                matched_bucket = None
-                for o in outcomes:
-                    t_low, t_high = o["range"]
-                    if in_bucket(forecast_temp, t_low, t_high):
-                        matched_bucket = o
-                        break
+                        # Check stop
+                        if current_price <= stop:
+                            pnl = round((current_price - entry) * pos["shares"], 2)
+                            balance += pos["cost"] + pnl
+                            pos["closed_at"]    = snap.get("ts")
+                            pos["close_reason"] = "stop_loss" if current_price < entry else "trailing_stop"
+                            pos["exit_price"]   = current_price
+                            pos["pnl"]          = pnl
+                            pos["status"]       = "closed"
+                            closed += 1
+                            reason = "STOP" if current_price < entry else "TRAILING BE"
+                            print(f"  [{reason}] {loc['name']} {date} | entry ${entry:.3f} exit ${current_price:.3f} | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
 
-                if matched_bucket:
-                    o = matched_bucket
-                    t_low, t_high = o["range"]
-                    volume = o["volume"]
-                    bid    = o.get("bid", o["price"])
-                    ask    = o.get("ask", o["price"])
-                    spread = o.get("spread", 0)
+                # --- CLOSE POSITION if forecast shifted 2+ degrees ---
+                if mkt.get("position") and forecast_temp is not None:
+                    pos = mkt["position"]
+                    old_bucket_low  = pos["bucket_low"]
+                    old_bucket_high = pos["bucket_high"]
+                    buffer = 2.0 if unit == "F" else 1.0
+                    mid_bucket = (old_bucket_low + old_bucket_high) / 2 if old_bucket_low != -999 and old_bucket_high != 999 else forecast_temp
+                    forecast_far = abs(forecast_temp - mid_bucket) > (abs(mid_bucket - old_bucket_low) + buffer)
+                    if not in_bucket(forecast_temp, old_bucket_low, old_bucket_high) and forecast_far:
+                        current_price = None
+                        for o in outcomes:
+                            if o["market_id"] == pos["market_id"]:
+                                current_price = o["price"]
+                                break
+                        if current_price is not None:
+                            pnl = round((current_price - pos["entry_price"]) * pos["shares"], 2)
+                            balance += pos["cost"] + pnl
+                            mkt["position"]["closed_at"]    = snap.get("ts")
+                            mkt["position"]["close_reason"] = "forecast_changed"
+                            mkt["position"]["exit_price"]   = current_price
+                            mkt["position"]["pnl"]          = pnl
+                            mkt["position"]["status"]       = "closed"
+                            closed += 1
+                            print(f"  [CLOSE] {loc['name']} {date} [{market_type}] — forecast changed | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
 
-                    # All filters — if any fails, skip this market entirely
-                    if volume >= MIN_VOLUME:
-                        p  = bucket_prob(forecast_temp, t_low, t_high, sigma)
-                        ev = calc_ev(p, ask)
-                        effective_min_ev = MIN_EV * max(1.0, sigma / SIGMA_REF) if STRAT_DYNAMIC_EV else MIN_EV
-                        if ev >= effective_min_ev:
-                            kelly = calc_kelly(p, ask)
-                            size  = bet_size(kelly, balance, horizon_days=i)
-                            if size >= 0.50:
-                                best_signal = {
-                                    "market_id":    o["market_id"],
-                                    "question":     o["question"],
-                                    "bucket_low":   t_low,
-                                    "bucket_high":  t_high,
-                                    "entry_price":  ask,
-                                    "bid_at_entry": bid,
-                                    "spread":       spread,
-                                    "shares":       round(size / ask, 2),
-                                    "cost":         size,
-                                    "p":            round(p, 4),
-                                    "ev":           round(ev, 4),
-                                    "kelly":        round(kelly, 4),
-                                    "forecast_temp":forecast_temp,
-                                    "forecast_src": best_source,
-                                    "sigma":        sigma,
-                                    "opened_at":    snap.get("ts"),
-                                    "status":       "open",
-                                    "pnl":          None,
-                                    "exit_price":   None,
-                                    "close_reason": None,
-                                    "closed_at":    None,
-                                }
+                # --- OPEN POSITION ---
+                if not mkt.get("position") and forecast_temp is not None and hours >= MIN_HOURS:
+                    sigma = get_sigma(city_slug, best_source or "ecmwf", market_type)
+                    best_signal = None
 
-                if best_signal:
-                    # Fetch real bestAsk from Polymarket API for accurate entry price
-                    skip_position = False
-                    try:
-                        r = requests.get(f"https://gamma-api.polymarket.com/markets/{best_signal['market_id']}", timeout=(3, 5))
-                        mdata = r.json()
-                        real_ask = float(mdata.get("bestAsk", best_signal["entry_price"]))
-                        real_bid = float(mdata.get("bestBid", best_signal["bid_at_entry"]))
-                        real_spread = round(real_ask - real_bid, 4)
-                        # Re-check slippage and price with real values
-                        if real_spread > MAX_SLIPPAGE or real_ask >= MAX_PRICE:
-                            print(f"  [SKIP] {loc['name']} {date} — real ask ${real_ask:.3f} spread ${real_spread:.3f}")
-                            skip_position = True
-                        else:
-                            best_signal["entry_price"]  = real_ask
-                            best_signal["bid_at_entry"] = real_bid
-                            best_signal["spread"]       = real_spread
-                            best_signal["shares"]       = round(best_signal["cost"] / real_ask, 2)
-                            best_signal["ev"]           = round(calc_ev(best_signal["p"], real_ask), 4)
-                    except Exception as e:
-                        print(f"  [WARN] Could not fetch real ask for {best_signal['market_id']}: {e}")
+                    matched_bucket = None
+                    for o in outcomes:
+                        t_low, t_high = o["range"]
+                        if in_bucket(forecast_temp, t_low, t_high):
+                            matched_bucket = o
+                            break
 
-                    if not skip_position and best_signal["entry_price"] < MAX_PRICE:
-                        balance -= best_signal["cost"]
-                        mkt["position"] = best_signal
-                        state["total_trades"] += 1
-                        new_pos += 1
-                        bucket_label = f"{best_signal['bucket_low']}-{best_signal['bucket_high']}{unit_sym}"
-                        print(f"  [BUY]  {loc['name']} {horizon} {date} | {bucket_label} | "
-                              f"${best_signal['entry_price']:.3f} | EV {best_signal['ev']:+.2f} | "
-                              f"${best_signal['cost']:.2f} ({best_signal['forecast_src'].upper()})")
+                    if matched_bucket:
+                        o = matched_bucket
+                        t_low, t_high = o["range"]
 
-            # Market closed by time
-            if hours < 0.5 and mkt["status"] == "open":
-                mkt["status"] = "closed"
+                        # Cross-market consistency check
+                        other_type = "lowest" if market_type == "highest" else "highest"
+                        other_mkt  = load_market(city_slug, date, other_type)
+                        if other_mkt and other_mkt.get("position"):
+                            other_pos = other_mkt["position"]
+                            if market_type == "highest":
+                                consistent = _buckets_are_consistent(t_low, t_high,
+                                                                      other_pos["bucket_low"],
+                                                                      other_pos["bucket_high"])
+                            else:
+                                consistent = _buckets_are_consistent(other_pos["bucket_low"],
+                                                                      other_pos["bucket_high"],
+                                                                      t_low, t_high)
+                            if not consistent:
+                                print(f"  [SKIP] {loc['name']} {date} [{market_type}]: "
+                                      f"bucket {t_low}-{t_high} inconsistent with open "
+                                      f"{other_type} {other_pos['bucket_low']}-{other_pos['bucket_high']}")
+                                matched_bucket = None
 
-            save_market(mkt)
-            time.sleep(0.1)
+                    if matched_bucket:
+                        o = matched_bucket
+                        t_low, t_high = o["range"]
+                        volume = o["volume"]
+                        bid    = o.get("bid", o["price"])
+                        ask    = o.get("ask", o["price"])
+                        spread = o.get("spread", 0)
+
+                        if volume >= MIN_VOLUME:
+                            p  = bucket_prob(forecast_temp, t_low, t_high, sigma)
+                            ev = calc_ev(p, ask)
+                            effective_min_ev = MIN_EV * max(1.0, sigma / SIGMA_REF) if STRAT_DYNAMIC_EV else MIN_EV
+                            if ev >= effective_min_ev:
+                                kelly = calc_kelly(p, ask)
+                                size  = bet_size(kelly, balance, horizon_days=i)
+                                if size >= 0.50:
+                                    best_signal = {
+                                        "market_id":    o["market_id"],
+                                        "question":     o["question"],
+                                        "bucket_low":   t_low,
+                                        "bucket_high":  t_high,
+                                        "entry_price":  ask,
+                                        "bid_at_entry": bid,
+                                        "spread":       spread,
+                                        "shares":       round(size / ask, 2),
+                                        "cost":         size,
+                                        "p":            round(p, 4),
+                                        "ev":           round(ev, 4),
+                                        "kelly":        round(kelly, 4),
+                                        "forecast_temp":forecast_temp,
+                                        "forecast_src": best_source,
+                                        "sigma":        sigma,
+                                        "opened_at":    snap.get("ts"),
+                                        "status":       "open",
+                                        "pnl":          None,
+                                        "exit_price":   None,
+                                        "close_reason": None,
+                                        "closed_at":    None,
+                                    }
+
+                    if best_signal:
+                        # Fetch real bestAsk from Polymarket API for accurate entry price
+                        skip_position = False
+                        try:
+                            r = requests.get(f"https://gamma-api.polymarket.com/markets/{best_signal['market_id']}", timeout=(3, 5))
+                            mdata = r.json()
+                            real_ask = float(mdata.get("bestAsk", best_signal["entry_price"]))
+                            real_bid = float(mdata.get("bestBid", best_signal["bid_at_entry"]))
+                            real_spread = round(real_ask - real_bid, 4)
+                            if real_spread > MAX_SLIPPAGE or real_ask >= MAX_PRICE:
+                                print(f"  [SKIP] {loc['name']} {date} [{market_type}] — real ask ${real_ask:.3f} spread ${real_spread:.3f}")
+                                skip_position = True
+                            else:
+                                best_signal["entry_price"]  = real_ask
+                                best_signal["bid_at_entry"] = real_bid
+                                best_signal["spread"]       = real_spread
+                                best_signal["shares"]       = round(best_signal["cost"] / real_ask, 2)
+                                best_signal["ev"]           = round(calc_ev(best_signal["p"], real_ask), 4)
+                        except Exception as e:
+                            print(f"  [WARN] Could not fetch real ask for {best_signal['market_id']}: {e}")
+
+                        if not skip_position and best_signal["entry_price"] < MAX_PRICE:
+                            balance -= best_signal["cost"]
+                            mkt["position"] = best_signal
+                            state["total_trades"] += 1
+                            new_pos += 1
+                            tag          = "[HI]" if market_type == "highest" else "[LO]"
+                            bucket_label = f"{best_signal['bucket_low']}-{best_signal['bucket_high']}{unit_sym}"
+                            print(f"  [BUY]  {tag} {loc['name']} {horizon} {date} | {bucket_label} | "
+                                  f"${best_signal['entry_price']:.3f} | EV {best_signal['ev']:+.2f} | "
+                                  f"${best_signal['cost']:.2f} ({best_signal['forecast_src'].upper()})")
+
+                # Market closed by time
+                if hours < 0.5 and mkt["status"] == "open":
+                    mkt["status"] = "closed"
+
+                save_market(mkt)
+                time.sleep(0.1)
 
         print("ok")
 
@@ -893,7 +912,7 @@ def scan_and_update():
         mkt["pnl"]          = pnl
         mkt["status"]       = "resolved"
         mkt["resolved_outcome"] = "win" if won else "loss"
-        mkt["actual_temp"]  = get_actual_temp(mkt["city"], mkt["date"])
+        mkt["actual_temp"]  = get_actual_temp(mkt["city"], mkt["date"], mkt.get("type", "highest"))
 
         if won:
             state["wins"] += 1
@@ -901,7 +920,8 @@ def scan_and_update():
             state["losses"] += 1
 
         result = "WIN" if won else "LOSS"
-        print(f"  [{result}] {mkt['city_name']} {mkt['date']} | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
+        tag = "[HI]" if mkt.get("type", "highest") == "highest" else "[LO]"
+        print(f"  [{result}] {tag} {mkt['city_name']} {mkt['date']} | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
         resolved += 1
 
         save_market(mkt)

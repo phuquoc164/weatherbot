@@ -140,6 +140,30 @@ Terminal 2:  venv/bin/python dashboard.py     # both dashboards
 
 ---
 
+## Parallel Strategy Testing
+
+Run multiple strategy variants simultaneously in isolated directories to compare P&L without touching the live bot:
+
+```bash
+# Set up run directories for all variants
+python strategies/runner.py setup
+
+# Start a variant
+python strategies/runner.py start baseline
+
+# Check status of all variants
+python strategies/runner.py status
+
+# Compare P&L across variants
+python strategies/compare.py
+```
+
+Each variant reads its config from `strategies/configs/<name>.json` and writes all data to `runs/<name>/data/`. The live bot's `data/` directory is never touched. Variants are staggered by 120 seconds at startup to avoid API rate limits.
+
+Five pre-built configs are included: `baseline`, `prob_model`, `time_decay`, `dynamic_ev`, `combined`. See `docs/strategy-runner.md` for the full reference.
+
+---
+
 ## Dashboard Features
 
 ### Bloomberg Dashboard (`/`)
@@ -153,6 +177,8 @@ Terminal 2:  venv/bin/python dashboard.py     # both dashboards
 - **Activity Feed** — Real-time event log (buys, exits, forecasts)
 - **Balance Chart** — Equity history over time
 - **Real-time updates** via WebSocket (file-watcher based, no polling)
+- **Source selector** — dropdown to switch between main thread and running strategy variants; hides automatically when no variants are configured
+- **Strategy comparison** — Bloomberg-style table with P&L, ROI, win rate, avg EV, and sparkline equity curve for all sources side-by-side
 
 ### Retro Terminal Dashboard (`/retro`)
 

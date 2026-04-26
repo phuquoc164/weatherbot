@@ -13,6 +13,7 @@ Usage:
 import json
 import asyncio
 import argparse
+import os
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,7 +21,7 @@ from typing import Optional
 
 import psutil
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -35,6 +36,9 @@ DATA_DIR         = BASE_DIR / "data"
 STATE_FILE       = DATA_DIR / "state.json"
 MARKETS_DIR      = DATA_DIR / "markets"
 CALIBRATION_FILE = DATA_DIR / "calibration.json"
+RUNS_DIR         = BASE_DIR / "runs"
+
+STRATEGY_VARIANTS = ["baseline", "prob_model", "time_decay", "dynamic_ev", "combined"]
 
 # =============================================================================
 # LOCATIONS  (mirrored from weatherbot.py)
@@ -86,7 +90,7 @@ def read_json(path: Path) -> Optional[dict]:
         return None
 
 
-def read_state() -> dict:
+def read_state(state_file: Path = STATE_FILE) -> dict:
     """Read state.json with safe defaults."""
     defaults = {
         "balance": 0.0,
@@ -96,28 +100,28 @@ def read_state() -> dict:
         "losses": 0,
         "peak_balance": 0.0,
     }
-    data = read_json(STATE_FILE)
+    data = read_json(state_file)
     if data is None:
         return defaults
     defaults.update(data)
     return defaults
 
 
-def read_all_markets() -> dict:
+def read_all_markets(markets_dir: Path = MARKETS_DIR) -> dict:
     """Read all data/markets/*.json; keyed by file stem (e.g. 'nyc_2026-03-24')."""
     markets = {}
-    if not MARKETS_DIR.exists():
+    if not markets_dir.exists():
         return markets
-    for path in sorted(MARKETS_DIR.glob("*.json")):
+    for path in sorted(markets_dir.glob("*.json")):
         data = read_json(path)
         if data is not None:
             markets[path.stem] = data
     return markets
 
 
-def read_calibration() -> Optional[dict]:
+def read_calibration(calibration_file: Path = CALIBRATION_FILE) -> Optional[dict]:
     """Read calibration.json; return None if missing."""
-    return read_json(CALIBRATION_FILE)
+    return read_json(calibration_file)
 
 
 def check_bot_status() -> dict:
@@ -185,7 +189,7 @@ def detect_changes(old_markets: dict, new_markets: dict) -> list[dict]:
             latest = new_data["forecast_snapshots"][-1]
             events.append({
                 "ts": now, "type": "monitor",
-                "msg": f"FORECAST {city} {latest.get('best_source', '').upper()} {latest.get('best')}°"
+                "msg": f"FORECAST {city} {(latest.get('best_source') or '').upper()} {latest.get('best')}°"
             })
 
     return events
@@ -195,12 +199,23 @@ def detect_changes(old_markets: dict, new_markets: dict) -> list[dict]:
 # =============================================================================
 
 
-def build_dashboard_data() -> dict:
+def build_dashboard_data(
+    data_dir: Path = DATA_DIR,
+    *,
+    is_variant: bool = False,
+) -> dict:
     """Build the complete dashboard payload."""
-    state = read_state()
-    markets = read_all_markets()
-    calibration = read_calibration()
-    bot_status = check_bot_status()
+    state_file       = data_dir / "state.json"
+    markets_dir      = data_dir / "markets"
+    calibration_file = data_dir / "calibration.json"
+
+    state       = read_state(state_file)
+    markets     = read_all_markets(markets_dir)
+    calibration = read_calibration(calibration_file)
+    bot_status  = check_bot_status() if not is_variant else {
+        "running": False, "pid": None, "cpu_percent": 0.0,
+        "memory_mb": 0.0, "uptime_seconds": 0,
+    }
 
     # Compute derived KPIs
     open_positions = []
@@ -306,10 +321,11 @@ def build_dashboard_data() -> dict:
 
     drawdown = ((equity - peak) / peak * 100) if peak > 0 else 0
 
-    # Track balance history (equity over time)
+    # Track balance history (main thread only — variants must not pollute shared state)
     now_str = datetime.now(timezone.utc).isoformat()
-    if not balance_history or balance_history[-1]["balance"] != equity:
-        balance_history.append({"ts": now_str, "balance": equity})
+    if not is_variant:
+        if not balance_history or balance_history[-1]["balance"] != equity:
+            balance_history.append({"ts": now_str, "balance": equity})
 
     return {
         "state": state,
@@ -328,8 +344,8 @@ def build_dashboard_data() -> dict:
         "forecasts": forecasts,
         "calibration": calibration,
         "bot_status": bot_status,
-        "balance_history": balance_history,
-        "activity": list(activity_feed),
+        "balance_history": balance_history if not is_variant else [],
+        "activity": list(activity_feed) if not is_variant else [],
         "locations": LOCATIONS,
     }
 
@@ -377,7 +393,6 @@ async def api_market_detail(city: str, date: str):
     path = MARKETS_DIR / f"{stem}.json"
     data = read_json(path)
     if data is None:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail=f"Market {stem} not found")
     return data
 
@@ -395,6 +410,172 @@ async def api_bot_status():
 @app.get("/api/dashboard")
 async def api_dashboard():
     return build_dashboard_data()
+
+
+# ---------------------------------------------------------------------------
+# Strategy variant helpers
+# ---------------------------------------------------------------------------
+
+def _variant_pid_running(name: str) -> bool:
+    pid_path = RUNS_DIR / name / "weatherbot.pid"
+    if not pid_path.exists():
+        return False
+    try:
+        pid = int(pid_path.read_text(encoding="utf-8").strip())
+        os.kill(pid, 0)
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def _equity_series(markets_dir: Path) -> list[float]:
+    """Equity replay over closed positions, capped at 50 points for sparklines."""
+    if not markets_dir.exists():
+        return []
+    events = []
+    for fp in markets_dir.glob("*.json"):
+        try:
+            m = json.loads(fp.read_text(encoding="utf-8"))
+            pos = m.get("position")
+            if pos and pos.get("status") == "closed" and pos.get("closed_at"):
+                events.append((pos["closed_at"], pos.get("pnl") or 0))
+        except (json.JSONDecodeError, OSError):
+            continue
+    if len(events) < 2:
+        return []
+    events.sort(key=lambda x: x[0])
+    equity, series = 1000.0, [1000.0]
+    for _, pnl in events:
+        equity += pnl
+        series.append(round(equity, 2))
+    return series[-50:]
+
+
+# ---------------------------------------------------------------------------
+# Strategy variant endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/variants")
+async def api_variants():
+    """List configured variants and their running status."""
+    variants_info = []
+    for name in STRATEGY_VARIANTS:
+        vdir = RUNS_DIR / name
+        if not (vdir / "config.json").exists():
+            continue
+        variants_info.append({
+            "name":    name,
+            "label":   name,
+            "running": _variant_pid_running(name),
+        })
+    return {
+        "main_running": STATE_FILE.exists(),
+        "variants":     variants_info,
+    }
+
+
+@app.get("/api/source/{name}/dashboard")
+async def api_variant_dashboard(name: str):
+    """Return dashboard data for a specific strategy variant."""
+    if name not in STRATEGY_VARIANTS:
+        raise HTTPException(status_code=404, detail=f"Unknown variant '{name}'")
+    result = build_dashboard_data(data_dir=RUNS_DIR / name / "data", is_variant=True)
+    result["bot_status"]["running"] = _variant_pid_running(name)
+    return result
+
+
+@app.get("/api/comparison")
+async def api_comparison():
+    """Compact P&L summary of all variants and the main thread."""
+    sources = []
+
+    if STATE_FILE.exists():
+        state   = read_state()
+        markets = read_all_markets()
+        closed  = [
+            pos for m in markets.values()
+            if (pos := m.get("position")) and pos.get("status") == "closed"
+        ]
+        wins      = sum(1 for p in closed if (p.get("pnl") or 0) > 0)
+        total_pnl = round(sum(p.get("pnl") or 0 for p in closed), 2)
+        evs       = [p["ev"] for p in closed if p.get("ev") is not None]
+        start_bal = state.get("starting_balance", 1000.0)
+        balance   = state.get("balance", start_bal)
+        sources.append({
+            "name":     "main",
+            "label":    "Main thread",
+            "balance":  balance,
+            "pnl":      total_pnl,
+            "roi":      round((balance - start_bal) / start_bal * 100, 2) if start_bal else 0.0,
+            "trades":   len(closed),
+            "wins":     wins,
+            "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
+            "avg_ev":   round(sum(evs) / len(evs), 4) if evs else None,
+            "flags":    [],
+            "running":  True,
+            "series":   _equity_series(MARKETS_DIR),
+        })
+
+    for name in STRATEGY_VARIANTS:
+        vdir = RUNS_DIR / name
+        if not (vdir / "config.json").exists():
+            continue
+
+        data_dir    = vdir / "data"
+        state_path = data_dir / "state.json"
+        state = {}
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        start_bal = state.get("starting_balance", 1000.0)
+        balance   = state.get("balance", start_bal)
+
+        markets_dir = data_dir / "markets"
+        closed = []
+        if markets_dir.exists():
+            for fp in markets_dir.glob("*.json"):
+                try:
+                    m   = json.loads(fp.read_text(encoding="utf-8"))
+                    pos = m.get("position")
+                    if pos and pos.get("status") == "closed":
+                        closed.append(pos)
+                except (json.JSONDecodeError, OSError):
+                    continue
+
+        wins      = sum(1 for p in closed if (p.get("pnl") or 0) > 0)
+        total_pnl = round(sum(p.get("pnl") or 0 for p in closed), 2)
+        evs       = [p["ev"] for p in closed if p.get("ev") is not None]
+
+        flags = []
+        try:
+            cfg   = json.loads((vdir / "config.json").read_text(encoding="utf-8"))
+            strat = cfg.get("strategy", {})
+            flags = [k for k, v in strat.items() if v is True]
+        except (json.JSONDecodeError, OSError):
+            pass
+
+        sources.append({
+            "name":     name,
+            "label":    name,
+            "balance":  balance,
+            "pnl":      total_pnl,
+            "roi":      round((balance - start_bal) / start_bal * 100, 2) if start_bal else 0.0,
+            "trades":   len(closed),
+            "wins":     wins,
+            "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
+            "avg_ev":   round(sum(evs) / len(evs), 4) if evs else None,
+            "flags":    flags,
+            "running":  _variant_pid_running(name),
+            "series":   _equity_series(markets_dir),
+        })
+
+    return {
+        "sources":      sources,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @app.get("/simulation.json")

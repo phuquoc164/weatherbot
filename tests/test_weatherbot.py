@@ -289,5 +289,153 @@ class TestRunCalibration(unittest.TestCase):
         self.assertAlmostEqual(result["paris_ecmwf"]["sigma"], 2.0)
 
 
+class TestBucketProbWithProbModel(unittest.TestCase):
+    """bucket_prob() interior-bucket behavior with STRAT_PROB_MODEL toggled."""
+
+    def test_interior_bucket_returns_continuous_probability(self):
+        with patch.object(weatherbot, "STRAT_PROB_MODEL", True):
+            prob = weatherbot.bucket_prob(46.5, 46.0, 47.0, sigma=2.0)
+        self.assertGreater(prob, 0.0)
+        self.assertLess(prob, 1.0)
+
+    def test_interior_bucket_probability_matches_normal_cdf_formula(self):
+        # Forecast 46.5, bucket [46, 47], sigma=2: CDF((47-46.5)/2) - CDF((46-46.5)/2)
+        with patch.object(weatherbot, "STRAT_PROB_MODEL", True):
+            prob = weatherbot.bucket_prob(46.5, 46.0, 47.0, sigma=2.0)
+        expected = weatherbot.norm_cdf(0.25) - weatherbot.norm_cdf(-0.25)
+        self.assertAlmostEqual(prob, expected, places=6)
+
+    def test_interior_bucket_forecast_far_outside_is_near_zero(self):
+        with patch.object(weatherbot, "STRAT_PROB_MODEL", True):
+            prob = weatherbot.bucket_prob(100.0, 46.0, 47.0, sigma=2.0)
+        self.assertLess(prob, 0.001)
+
+    def test_interior_bucket_flag_off_remains_binary(self):
+        with patch.object(weatherbot, "STRAT_PROB_MODEL", False):
+            self.assertEqual(weatherbot.bucket_prob(46.5, 46.0, 47.0), 1.0)
+            self.assertEqual(weatherbot.bucket_prob(50.0, 46.0, 47.0), 0.0)
+
+    def test_edge_buckets_use_cdf_regardless_of_flag(self):
+        # Lower-edge bucket (t_low=-999) always uses CDF — flag has no effect
+        with patch.object(weatherbot, "STRAT_PROB_MODEL", False):
+            p_off = weatherbot.bucket_prob(27.0, -999, 32.0, sigma=2.0)
+        with patch.object(weatherbot, "STRAT_PROB_MODEL", True):
+            p_on = weatherbot.bucket_prob(27.0, -999, 32.0, sigma=2.0)
+        self.assertAlmostEqual(p_off, p_on, places=6)
+
+
+class TestBetSizeWithTimeDecay(unittest.TestCase):
+    """bet_size() horizon multiplier behaviour with STRAT_TIME_DECAY toggled."""
+
+    def test_flag_off_ignores_horizon_days(self):
+        with (
+            patch.object(weatherbot, "STRAT_TIME_DECAY", False),
+            patch.object(weatherbot, "MAX_BET", 500.0),
+        ):
+            no_horizon = weatherbot.bet_size(0.1, 1000, horizon_days=None)
+            with_horizon = weatherbot.bet_size(0.1, 1000, horizon_days=3)
+        self.assertEqual(no_horizon, with_horizon)
+
+    def test_horizon_0_no_decay(self):
+        with (
+            patch.object(weatherbot, "STRAT_TIME_DECAY", True),
+            patch.object(weatherbot, "MAX_BET", 500.0),
+        ):
+            result = weatherbot.bet_size(0.1, 1000, horizon_days=0)
+        self.assertAlmostEqual(result, 100.0, places=2)  # 0.1 * 1000 * 1.0
+
+    def test_horizon_1_80_percent(self):
+        with (
+            patch.object(weatherbot, "STRAT_TIME_DECAY", True),
+            patch.object(weatherbot, "MAX_BET", 500.0),
+        ):
+            result = weatherbot.bet_size(0.1, 1000, horizon_days=1)
+        self.assertAlmostEqual(result, 80.0, places=2)  # 0.1 * 1000 * 0.8
+
+    def test_horizon_2_60_percent(self):
+        with (
+            patch.object(weatherbot, "STRAT_TIME_DECAY", True),
+            patch.object(weatherbot, "MAX_BET", 500.0),
+        ):
+            result = weatherbot.bet_size(0.1, 1000, horizon_days=2)
+        self.assertAlmostEqual(result, 60.0, places=2)  # 0.1 * 1000 * 0.6
+
+    def test_horizon_3_40_percent(self):
+        with (
+            patch.object(weatherbot, "STRAT_TIME_DECAY", True),
+            patch.object(weatherbot, "MAX_BET", 500.0),
+        ):
+            result = weatherbot.bet_size(0.1, 1000, horizon_days=3)
+        self.assertAlmostEqual(result, 40.0, places=2)  # 0.1 * 1000 * 0.4
+
+    def test_unknown_horizon_defaults_to_full_size(self):
+        # horizon_days=5 not in _HORIZON_MULT → dict.get default is 1.0
+        with (
+            patch.object(weatherbot, "STRAT_TIME_DECAY", True),
+            patch.object(weatherbot, "MAX_BET", 500.0),
+        ):
+            result = weatherbot.bet_size(0.1, 1000, horizon_days=5)
+        self.assertAlmostEqual(result, 100.0, places=2)
+
+    def test_none_horizon_no_decay_even_with_flag_on(self):
+        # Guard condition: `horizon_days is not None` prevents decay when None
+        with (
+            patch.object(weatherbot, "STRAT_TIME_DECAY", True),
+            patch.object(weatherbot, "MAX_BET", 500.0),
+        ):
+            result = weatherbot.bet_size(0.1, 1000, horizon_days=None)
+        self.assertAlmostEqual(result, 100.0, places=2)
+
+
+class TestDynamicEvScaling(unittest.TestCase):
+    """Verify the STRAT_DYNAMIC_EV formula: MIN_EV * max(1.0, sigma / SIGMA_REF)."""
+
+    def _effective_min_ev(self, sigma):
+        """Replicates the inline formula from scan_and_update."""
+        if weatherbot.STRAT_DYNAMIC_EV:
+            return weatherbot.MIN_EV * max(1.0, sigma / weatherbot.SIGMA_REF)
+        return weatherbot.MIN_EV
+
+    def test_flag_off_always_returns_min_ev(self):
+        with patch.object(weatherbot, "STRAT_DYNAMIC_EV", False):
+            for sigma in [0.5, 2.0, 5.0]:
+                self.assertEqual(self._effective_min_ev(sigma), weatherbot.MIN_EV)
+
+    def test_sigma_at_ref_no_scaling(self):
+        with (
+            patch.object(weatherbot, "STRAT_DYNAMIC_EV", True),
+            patch.object(weatherbot, "SIGMA_REF", 2.0),
+        ):
+            result = self._effective_min_ev(2.0)
+        self.assertAlmostEqual(result, weatherbot.MIN_EV, places=6)
+
+    def test_sigma_below_ref_no_scaling(self):
+        # max(1.0, 1.0/2.0) = 1.0 → threshold unchanged
+        with (
+            patch.object(weatherbot, "STRAT_DYNAMIC_EV", True),
+            patch.object(weatherbot, "SIGMA_REF", 2.0),
+        ):
+            result = self._effective_min_ev(1.0)
+        self.assertAlmostEqual(result, weatherbot.MIN_EV, places=6)
+
+    def test_sigma_double_ref_doubles_threshold(self):
+        with (
+            patch.object(weatherbot, "STRAT_DYNAMIC_EV", True),
+            patch.object(weatherbot, "MIN_EV", 0.10),
+            patch.object(weatherbot, "SIGMA_REF", 2.0),
+        ):
+            result = self._effective_min_ev(4.0)  # 4.0/2.0 = 2.0
+        self.assertAlmostEqual(result, 0.20, places=6)
+
+    def test_sigma_one_and_half_ref_scales_proportionally(self):
+        with (
+            patch.object(weatherbot, "STRAT_DYNAMIC_EV", True),
+            patch.object(weatherbot, "MIN_EV", 0.10),
+            patch.object(weatherbot, "SIGMA_REF", 2.0),
+        ):
+            result = self._effective_min_ev(3.0)  # 3.0/2.0 = 1.5
+        self.assertAlmostEqual(result, 0.15, places=6)
+
+
 if __name__ == "__main__":
     unittest.main()

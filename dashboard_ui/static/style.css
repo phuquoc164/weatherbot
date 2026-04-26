@@ -482,3 +482,132 @@ body {
 
 .popup-detail .label { color: var(--text-secondary); font-size: 9px; text-transform: uppercase; }
 .popup-detail .value { color: var(--text-data); font-family: var(--font-mono); }
+
+/* ---- Source Selector ---- */
+#source-select {
+    background: var(--bg-main);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    padding: 2px 6px;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 18px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%238b949e'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+}
+
+#source-select:focus {
+    border-color: var(--accent-green);
+    box-shadow: 0 0 0 2px rgba(63,185,80,0.15);
+}
+
+#source-select option:disabled {
+    color: var(--text-secondary);
+}
+
+/* ---- Comparison Panel ---- */
+#comparison-panel {
+    padding: 12px 16px;
+    height: calc(100vh - 44px); /* minus status bar */
+    overflow-y: auto;
+    background: var(--bg-main);
+}
+
+.comp-table {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.comp-header {
+    display: grid;
+    grid-template-columns: 130px 1fr 90px 80px 70px 65px 60px 75px 110px;
+    gap: 0;
+    padding: 6px 10px;
+    color: var(--text-secondary);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2px;
+}
+
+.comp-row {
+    display: grid;
+    grid-template-columns: 130px 1fr 90px 80px 70px 65px 60px 75px 110px;
+    gap: 0;
+    padding: 7px 10px;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.4);
+    border-left: 2px solid transparent;
+    align-items: center;
+    transition: background 0.12s;
+}
+
+.comp-row:hover {
+    background: var(--bg-hover);
+}
+
+.comp-row-best {
+    border-left-color: var(--accent-green);
+    background: rgba(63, 185, 80, 0.04);
+}
+
+.comp-row-stopped {
+    opacity: 0.7;
+}
+
+.comp-row-dim {
+    color: var(--text-secondary);
+    opacity: 0.5;
+}
+
+.comp-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.comp-best-marker {
+    color: var(--accent-green);
+    font-size: 10px;
+    margin-left: 4px;
+}
+
+.comp-flags {
+    color: var(--text-secondary);
+    font-size: 9px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-right: 8px;
+}
+
+.comp-num {
+    text-align: right;
+    padding-right: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.comp-spark {
+    display: flex;
+    align-items: center;
+    padding-left: 4px;
+    opacity: 0.9;
+}
+
+.comp-footer {
+    font-size: 9px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 10px 10px 4px;
+    font-family: var(--font-mono);
+}

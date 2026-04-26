@@ -21,8 +21,11 @@
     <div class="right">
         <span>Scan interval: 60m</span>
         <span id="bot-status">Bot: checking...</span>
+        <select id="source-select" style="display:none" aria-label="Data source"></select>
     </div>
 </div>
+
+<div id="bloomberg-panels">
 
 <!-- KPI Strip -->
 <div class="kpi-strip" id="kpi-strip">
@@ -222,6 +225,11 @@
     </div>
 
 </div>
+
+</div><!-- #bloomberg-panels -->
+
+<!-- Comparison Panel (hidden until source = comparison) -->
+<div id="comparison-panel" style="display:none"></div>
 
 <!-- Scripts -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

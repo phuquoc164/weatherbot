@@ -23,3 +23,13 @@ jobs:
 
       - name: Run unit tests
         run: pytest tests/ -v --cov=weatherbot --cov-report=term-missing --cov-fail-under=15
+
+      - name: Smoke test strategy runner and compare scripts
+        # Verifies CLI tooling is importable and executable without any API
+        # keys or running bot processes. setup/status/compare --json only
+        # touch the filesystem, so this stays fast and credential-free.
+        # Kept separate from unit tests so failures are easy to attribute.
+        run: |
+          python strategies/runner.py setup
+          python strategies/runner.py status
+          python strategies/compare.py --json

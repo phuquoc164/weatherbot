@@ -1,0 +1,22 @@
+{
+  "balance": 1000.0,
+  "max_bet": 2.0,
+  "min_ev": 0.3,
+  "max_price": 0.45,
+  "min_volume": 500,
+  "min_hours": 2.0,
+  "max_hours": 72.0,
+  "kelly_fraction": 0.25,
+  "scan_interval": 3600,
+  "calibration_min": 30,
+  "max_slippage": 0.03,
+  "sigma_f": 2.0,
+  "sigma_c": 1.2,
+  "vc_key": "",
+  "strategy": {
+    "prob_model_normal_cdf": false,
+    "time_decay": false,
+    "dynamic_min_ev": false,
+    "sigma_ref": 2.0
+  }
+}

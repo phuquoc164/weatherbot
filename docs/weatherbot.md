@@ -144,6 +144,30 @@ All parameters are loaded from `config.json` in the working directory. Missing k
 }
 ```
 
+### Strategy Flags
+
+An optional `strategy` object enables experimental improvements. All flags default to `false` so the live bot is unaffected unless explicitly opted in.
+
+| Key | Default | Description |
+|---|---|---|
+| `strategy.prob_model_normal_cdf` | `false` | Replace binary probability for interior buckets with a normal CDF: `Φ((t_high − forecast) / σ) − Φ((t_low − forecast) / σ)` |
+| `strategy.time_decay` | `false` | Multiply bet size by a horizon factor — D+0: 1.0×, D+1: 0.8×, D+2: 0.6×, D+3: 0.4× |
+| `strategy.dynamic_min_ev` | `false` | Scale the EV threshold by `max(1.0, σ / sigma_ref)` — raises the bar when forecast uncertainty is above the reference level |
+| `strategy.sigma_ref` | `2.0` | Reference sigma for dynamic EV scaling (only active when `dynamic_min_ev` is `true`) |
+
+```json
+{
+  "strategy": {
+    "prob_model_normal_cdf": true,
+    "time_decay": true,
+    "dynamic_min_ev": true,
+    "sigma_ref": 2.0
+  }
+}
+```
+
+To evaluate flags in isolation without touching the live bot, use `strategies/runner.py` to run parallel variants. See `docs/strategy-runner.md`.
+
 ---
 
 ## Supported Locations
@@ -248,7 +272,7 @@ Polymarket temperature markets are divided into discrete buckets parsed from the
 **`bucket_prob(forecast, t_low, t_high, sigma)`**
 
 - **Edge buckets** (sentinel -999 or 999): uses the normal CDF tail. Models the probability that the actual temperature falls below `t_high` (lower edge) or above `t_low` (upper edge), assuming the actual temperature is normally distributed around the forecast with standard deviation `sigma`.
-- **Interior / exact buckets**: returns `1.0` if the forecast falls within the bucket, `0.0` otherwise. No distributional smoothing — if the forecast lands in the bucket, the bot assumes it will win.
+- **Interior / exact buckets**: returns `1.0` if the forecast falls within the bucket, `0.0` otherwise. No distributional smoothing — if the forecast lands in the bucket, the bot assumes it will win. When `strategy.prob_model_normal_cdf` is enabled, a continuous CDF probability is used instead: `Φ((t_high − forecast) / σ) − Φ((t_low − forecast) / σ)` — more conservative for forecasts near a bucket edge.
 
 ### Entry Filters (all must pass)
 
@@ -257,7 +281,9 @@ Polymarket temperature markets are divided into discrete buckets parsed from the
 3. Hours remaining ≥ `MIN_HOURS`
 4. Exactly one bucket contains the forecast (`in_bucket` returns True)
 5. That bucket's volume ≥ `MIN_VOLUME`
-6. `EV = p × (1/ask − 1) − (1 − p) ≥ MIN_EV`
+6. `EV = p × (1/ask − 1) − (1 − p) ≥ effective_min_ev`
+   - `effective_min_ev = MIN_EV` normally
+   - `effective_min_ev = MIN_EV × max(1.0, σ / sigma_ref)` when `strategy.dynamic_min_ev` is enabled — raises the threshold proportionally when forecast uncertainty exceeds the reference level
 7. Kelly-sized bet ≥ $0.50
 8. Real-time re-check: `bestAsk < MAX_PRICE` AND `spread ≤ MAX_SLIPPAGE`
 
@@ -273,6 +299,19 @@ shares     = bet / ask
 ```
 
 The `MAX_BET` cap is a hard dollar limit. As balance grows, Kelly sizing grows but is always bounded by `MAX_BET`.
+
+**Time-decay scaling** (optional — requires `strategy.time_decay: true`)
+
+Bet size is multiplied by a horizon factor before the `MAX_BET` cap is applied:
+
+| Horizon | Multiplier |
+|---|---|
+| D+0 | 1.0× (no change) |
+| D+1 | 0.8× |
+| D+2 | 0.6× |
+| D+3 | 0.4× |
+
+This reduces exposure on far-horizon markets where forecast uncertainty is highest and there is less time to exit gracefully.
 
 ---
 
@@ -591,7 +630,7 @@ mypy weatherbot.py
 | `bucket_prob` | `(forecast, t_low, t_high, sigma=None)` | Probability forecast falls in bucket |
 | `calc_ev` | `(p, price)` | Expected value of a YES token bet |
 | `calc_kelly` | `(p, price)` | Kelly fraction (after KELLY_FRACTION multiplier) |
-| `bet_size` | `(kelly, balance)` | Dollar bet size (capped at MAX_BET) |
+| `bet_size` | `(kelly, balance, horizon_days=None)` | Dollar bet size (capped at MAX_BET; horizon-decayed when `STRAT_TIME_DECAY` is on) |
 
 ### Calibration
 

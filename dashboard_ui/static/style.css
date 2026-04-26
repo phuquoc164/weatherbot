@@ -92,6 +92,28 @@ body {
 .badge-polling { background: #9e6a03; color: white; }
 .badge-offline { background: #da3633; color: white; }
 .badge-stopped { background: #da3633; color: white; }
+.badge-hi {
+    background: rgba(59, 130, 246, 0.25);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    font-size: 0.65rem;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+}
+.badge-lo {
+    background: rgba(249, 115, 22, 0.25);
+    color: #fdba74;
+    border: 1px solid rgba(249, 115, 22, 0.4);
+    font-size: 0.65rem;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+}
 
 /* ---- KPI Strip ---- */
 .kpi-strip {

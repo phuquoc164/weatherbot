@@ -163,23 +163,29 @@ def detect_changes(old_markets: dict, new_markets: dict) -> list[dict]:
 
         old_pos = old_data.get("position")
         new_pos = new_data.get("position")
+        mtype = new_data.get("type", "highest")
+        tag   = "[HI]" if mtype == "highest" else "[LO]"
 
         # New position opened
         if old_pos is None and new_pos is not None:
             bucket = f"{new_pos.get('bucket_low')}-{new_pos.get('bucket_high')}{new_data.get('unit', '')}"
+            cost   = new_pos.get('cost', 0)
+            entry  = new_pos.get('entry_price', 0)
+            ev     = new_pos.get('ev', 0)
             events.append({
                 "ts": now, "type": "buy",
-                "msg": f"BUY {city} ${new_pos.get('cost', 0):.0f} @ {new_pos.get('entry_price', 0):.3f} bucket {bucket} (EV +{new_pos.get('ev', 0):.2f})"
+                "msg": f"BUY {tag} {city} ${cost:.0f} @ {entry:.3f} bucket {bucket} (EV +{ev:.2f})"
             })
 
         # Position closed
         if old_pos and new_pos and old_pos.get("status") == "open" and new_pos.get("status") == "closed":
-            reason = new_pos.get("close_reason", "unknown")
-            pnl = new_pos.get("pnl", 0) or 0
-            sign = "+" if pnl >= 0 else ""
+            reason     = new_pos.get("close_reason", "unknown")
+            pnl        = new_pos.get("pnl", 0) or 0
+            sign       = "+" if pnl >= 0 else ""
+            exit_price = new_pos.get('exit_price', 0)
             events.append({
                 "ts": now, "type": "stop" if pnl < 0 else "resolved",
-                "msg": f"EXIT {city} {reason} @ {new_pos.get('exit_price', 0):.3f} ({sign}${pnl:.2f})"
+                "msg": f"EXIT {tag} {city} {reason} @ {exit_price:.3f} ({sign}${pnl:.2f})"
             })
 
         # New forecast snapshot
@@ -187,9 +193,10 @@ def detect_changes(old_markets: dict, new_markets: dict) -> list[dict]:
         new_snaps = len(new_data.get("forecast_snapshots", []))
         if new_snaps > old_snaps:
             latest = new_data["forecast_snapshots"][-1]
+            source = (latest.get('best_source') or '').upper()
             events.append({
                 "ts": now, "type": "monitor",
-                "msg": f"FORECAST {city} {(latest.get('best_source') or '').upper()} {latest.get('best')}°"
+                "msg": f"FORECAST {tag} {city} {source} {latest.get('best')}°"
             })
 
     return events
@@ -242,6 +249,7 @@ def build_dashboard_data(
                 "city_name": m.get("city_name", m["city"]),
                 "date": m["date"],
                 "unit": m.get("unit", "F"),
+                "market_type": m.get("type", "highest"),
                 "bucket_low": pos.get("bucket_low"),
                 "bucket_high": pos.get("bucket_high"),
                 "entry_price": entry_price,
@@ -259,6 +267,7 @@ def build_dashboard_data(
                 "city_name": m.get("city_name", m["city"]),
                 "date": m["date"],
                 "unit": m.get("unit", "F"),
+                "market_type": m.get("type", "highest"),
                 "bucket_low": pos.get("bucket_low"),
                 "bucket_high": pos.get("bucket_high"),
                 "entry_price": pos.get("entry_price"),
@@ -278,6 +287,7 @@ def build_dashboard_data(
                 "city_name": m.get("city_name", m["city"]),
                 "date": m["date"],
                 "unit": m.get("unit", "F"),
+                "market_type": m.get("type", "highest"),
                 "horizon": latest.get("horizon"),
                 "ecmwf": latest.get("ecmwf"),
                 "hrrr": latest.get("hrrr"),

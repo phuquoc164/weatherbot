@@ -367,23 +367,43 @@ def in_bucket(forecast, t_low, t_high):
 
 # =============================================================================
 # MARKET DATA STORAGE
-# Each market is stored in a separate file: data/markets/{city}_{date}.json
+# Each market is stored in a separate file:
+#   data/markets/{city}_{date}_{market_type}.json
+# Legacy files without the type suffix are migrated to _highest on first load.
 # =============================================================================
 
-def market_path(city_slug, date_str):
-    return MARKETS_DIR / f"{city_slug}_{date_str}.json"
+def _normalize_legacy_filenames():
+    """Rename pre-feature market files from {city}_{date}.json to {city}_{date}_highest.json."""
+    for f in MARKETS_DIR.glob("*.json"):
+        parts = f.stem.rsplit("_", 1)
+        if parts[-1] in MARKET_TYPES:
+            continue  # already typed
+        new_path = f.with_name(f.stem + "_highest.json")
+        if new_path.exists():
+            print(f"  [WARN] Skipping rename: {new_path.name} already exists")
+            continue
+        data = json.loads(f.read_text(encoding="utf-8"))
+        data.setdefault("type", "highest")
+        new_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        f.unlink()
+        print(f"  [MIGRATE] {f.name} → {new_path.name}")
 
-def load_market(city_slug, date_str):
-    p = market_path(city_slug, date_str)
+def market_path(city_slug, date_str, market_type="highest"):
+    return MARKETS_DIR / f"{city_slug}_{date_str}_{market_type}.json"
+
+def load_market(city_slug, date_str, market_type="highest"):
+    p = market_path(city_slug, date_str, market_type)
     if p.exists():
         return json.loads(p.read_text(encoding="utf-8"))
     return None
 
 def save_market(market):
-    p = market_path(market["city"], market["date"])
+    mtype = market.get("type", "highest")
+    p = market_path(market["city"], market["date"], mtype)
     p.write_text(json.dumps(market, indent=2, ensure_ascii=False), encoding="utf-8")
 
 def load_all_markets():
+    _normalize_legacy_filenames()
     markets = []
     for f in MARKETS_DIR.glob("*.json"):
         try:
@@ -392,7 +412,7 @@ def load_all_markets():
             pass
     return markets
 
-def new_market(city_slug, date_str, event, hours):
+def new_market(city_slug, date_str, event, hours, market_type="highest"):
     loc = LOCATIONS[city_slug]
     resolution_url     = event.get("resolutionSource")
     resolution_station = parse_resolution_station(resolution_url)
@@ -416,6 +436,7 @@ def new_market(city_slug, date_str, event, hours):
         "forecast_snapshots": [],               # list of forecast snapshots
         "market_snapshots":   [],               # list of market price snapshots
         "all_outcomes":       [],               # all market buckets
+        "type":               market_type,
         "created_at":         datetime.now(timezone.utc).isoformat(),
     }
 
@@ -1015,6 +1036,7 @@ def monitor_positions():
 
 def run_loop():
     global _cal
+    _normalize_legacy_filenames()
     _cal = load_cal()
 
     print(f"\n{'='*55}")

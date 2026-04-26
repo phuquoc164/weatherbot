@@ -20,6 +20,7 @@ import time
 import requests
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 # =============================================================================
 # CONFIG
@@ -95,6 +96,8 @@ TIMEZONES = {
 
 MONTHS = ["january","february","march","april","may","june",
           "july","august","september","october","november","december"]
+
+MARKET_TYPES = ("highest", "lowest")
 
 # =============================================================================
 # MATH

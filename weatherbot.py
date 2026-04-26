@@ -987,8 +987,9 @@ def print_status():
             unrealized = round((current_price - pos["entry_price"]) * pos["shares"], 2)
             total_unrealized += unrealized
             pnl_str = f"{'+'if unrealized>=0 else ''}{unrealized:.2f}"
+            tag = "[HI]" if m.get("type", "highest") == "highest" else "[LO]"
 
-            print(f"    {m['city_name']:<16} {m['date']} | {label:<14} | "
+            print(f"    {tag} {m['city_name']:<14} {m['date']} | {label:<14} | "
                   f"entry ${pos['entry_price']:.3f} -> ${current_price:.3f} | "
                   f"PnL: {pnl_str} | {pos['forecast_src'].upper()}")
 
@@ -1027,7 +1028,7 @@ def print_report():
         print(f"    {name:<16} {w}/{len(group)} ({w/len(group):.0%})  PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
 
     print(f"\n  Market details:")
-    for m in sorted(resolved, key=lambda x: x["date"]):
+    for m in sorted(resolved, key=lambda x: (x["date"], x.get("type", "highest"))):
         pos      = m.get("position", {})
         unit_sym = "F" if m["unit"] == "F" else "C"
         snaps    = m.get("forecast_snapshots", [])
@@ -1038,7 +1039,8 @@ def print_report():
         pnl_str  = f"{'+'if m['pnl']>=0 else ''}{m['pnl']:.2f}" if m["pnl"] is not None else "-"
         fc_str   = f"forecast {first_fc}->{last_fc}{unit_sym}" if first_fc else "no forecast"
         actual   = f"actual {m['actual_temp']}{unit_sym}" if m["actual_temp"] else ""
-        print(f"    {m['city_name']:<16} {m['date']} | {label:<14} | {fc_str} | {actual} | {result} {pnl_str}")
+        tag      = "[HI]" if m.get("type", "highest") == "highest" else "[LO]"
+        print(f"    {tag} {m['city_name']:<14} {m['date']} | {label:<14} | {fc_str} | {actual} | {result} {pnl_str}")
 
     print(f"{'='*55}\n")
 

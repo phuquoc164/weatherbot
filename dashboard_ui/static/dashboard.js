@@ -7,6 +7,10 @@
     let ws = null;
     let reconnectDelay = 1000;
 
+    // Track current data source at module level.
+    // Never query #source-select on each poll tick — that races with user input.
+    let currentSource = "main";
+
     // =========================================================================
     // Leaflet Map
     // =========================================================================
@@ -102,7 +106,6 @@
             }
         }
 
-        // Fit bounds only on first load (don't reset user's zoom/pan on updates)
         if (!map._boundsSet) {
             const bounds = Object.values(locations).map(l => [l.lat, l.lon]);
             if (bounds.length > 0) {
@@ -369,10 +372,14 @@
     // =========================================================================
     function updateBotStatus(status) {
         const el = document.getElementById("bot-status");
+        const prefix = currentSource === "main" ? "Bot" : currentSource;
         if (status.running) {
-            el.textContent = "Bot: PID " + status.pid;
+            const detail = (currentSource === "main" && status.pid)
+                ? ": PID " + status.pid
+                : ": running";
+            el.textContent = prefix + detail;
         } else {
-            el.innerHTML = '<span class="badge badge-stopped">STOPPED</span>';
+            el.innerHTML = prefix + ': <span class="badge badge-stopped">STOPPED</span>';
         }
     }
 
@@ -405,7 +412,179 @@
     }
 
     // =========================================================================
-    // WebSocket connection
+    // Source selector
+    // =========================================================================
+    async function initSourceSelector() {
+        let resp;
+        try {
+            resp = await fetch("/api/variants");
+            if (!resp.ok) return;
+        } catch {
+            return;
+        }
+        const { main_running, variants } = await resp.json();
+        if (variants.length === 0) return; // no variants — normal single-source dashboard
+
+        const sel = document.getElementById("source-select");
+
+        if (main_running) {
+            sel.appendChild(new Option("Main thread", "main"));
+        }
+        variants.forEach(v => {
+            const opt = new Option(v.label, v.name);
+            if (!v.running) opt.disabled = true;
+            sel.appendChild(opt);
+        });
+        sel.appendChild(new Option("— Comparison —", "comparison"));
+
+        // Default: main if running, otherwise first running variant
+        const firstRunning = main_running
+            ? "main"
+            : (variants.find(v => v.running)?.name ?? variants[0].name);
+        sel.value = firstRunning;
+        currentSource = firstRunning;
+
+        sel.style.display = "inline-block";
+        sel.addEventListener("change", onSourceChange);
+
+        // If default is not main, switch to it now to load that source's data
+        if (firstRunning !== "main") {
+            await onSourceChange({ target: sel });
+        }
+    }
+
+    async function onSourceChange(e) {
+        currentSource = e.target.value;
+        const bloomberg = document.getElementById("bloomberg-panels");
+        const comparison = document.getElementById("comparison-panel");
+
+        if (currentSource === "comparison") {
+            bloomberg.style.display = "none";
+            comparison.style.display = "block";
+            await refreshComparison();
+        } else {
+            bloomberg.style.display = "";
+            comparison.style.display = "none";
+            await refreshDashboard();
+        }
+    }
+
+    async function refreshDashboard() {
+        const url = currentSource === "main"
+            ? "/api/dashboard"
+            : `/api/source/${currentSource}/dashboard`;
+        try {
+            const resp = await fetch(url);
+            if (resp.ok) {
+                updateDashboard(await resp.json());
+            }
+        } catch { /* keep stale data on network error */ }
+    }
+
+    async function refreshComparison() {
+        try {
+            const resp = await fetch("/api/comparison");
+            if (resp.ok) {
+                renderComparison(await resp.json());
+            }
+        } catch { /* keep stale */ }
+    }
+
+    // =========================================================================
+    // Sparkline — inline SVG, per-row normalized Y axis
+    // =========================================================================
+    function buildSparkline(series, color) {
+        if (!series || series.length < 2) return "";
+        const min = Math.min(...series);
+        const max = Math.max(...series);
+        const range = max - min || 1;
+        const W = 100, H = 24;
+        const step = W / (series.length - 1);
+        const pts = series.map((v, i) => {
+            const x = (i * step).toFixed(1);
+            const y = (H - ((v - min) / range) * (H - 2) - 1).toFixed(1);
+            return `${x},${y}`;
+        }).join(" ");
+        return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">` +
+            `<polyline stroke="${color}" stroke-width="1.5" fill="none" ` +
+            `vector-effect="non-scaling-stroke" points="${pts}"/></svg>`;
+    }
+
+    // =========================================================================
+    // Comparison view renderer
+    // =========================================================================
+    function renderComparison(data) {
+        const sources = data.sources || [];
+        const panel = document.getElementById("comparison-panel");
+
+        if (sources.length === 0) {
+            panel.innerHTML = '<div class="empty-state" style="padding:32px 0;">No variant data yet — run setup and start variants first.</div>';
+            return;
+        }
+
+        const maxPnl = Math.max(...sources.map(s => s.pnl));
+
+        let html = `<div class="comp-table">`;
+
+        // Header
+        html += `<div class="comp-header">` +
+            `<span>SOURCE</span>` +
+            `<span>FLAGS</span>` +
+            `<span class="comp-num">BALANCE</span>` +
+            `<span class="comp-num">P&amp;L</span>` +
+            `<span class="comp-num">ROI%</span>` +
+            `<span class="comp-num">TRADES</span>` +
+            `<span class="comp-num">WIN%</span>` +
+            `<span class="comp-num">AVG EV</span>` +
+            `<span>EQUITY</span>` +
+            `</div>`;
+
+        for (const s of sources) {
+            const isBest  = s.pnl === maxPnl && maxPnl > 0;
+            const noData  = s.trades === 0 && !s.running;
+            const pnlCls  = s.pnl > 0 ? "text-green" : s.pnl < 0 ? "text-red" : "text-muted";
+            const spark   = buildSparkline(s.series, s.pnl >= 0 ? "#3fb950" : "#f85149");
+
+            const pnlStr  = (s.pnl >= 0 ? "+" : "") + s.pnl.toFixed(2);
+            const roiStr  = (s.roi >= 0 ? "+" : "") + s.roi.toFixed(1) + "%";
+            const winStr  = s.win_rate !== null ? s.win_rate.toFixed(1) + "%" : "—";
+            const evStr   = s.avg_ev  !== null ? s.avg_ev.toFixed(4)   : "—";
+            const flagStr = s.flags && s.flags.length
+                ? s.flags.map(f => f.replace(/_/g, " ")).join(", ")
+                : "—";
+
+            let rowCls = "comp-row";
+            if (isBest)  rowCls += " comp-row-best";
+            if (noData)  rowCls += " comp-row-dim";
+            if (!s.running && !noData) rowCls += " comp-row-stopped";
+
+            html += `<div class="${rowCls}">` +
+                `<span class="comp-name">${s.label}` +
+                (isBest ? ` <span class="comp-best-marker">←</span>` : "") +
+                `</span>` +
+                `<span class="comp-flags">${flagStr}</span>` +
+                `<span class="comp-num">${noData ? "—" : "$" + s.balance.toFixed(2)}</span>` +
+                `<span class="comp-num ${pnlCls}">${noData ? "—" : pnlStr}</span>` +
+                `<span class="comp-num ${pnlCls}">${noData ? "—" : roiStr}</span>` +
+                `<span class="comp-num">${noData ? "—" : s.trades}</span>` +
+                `<span class="comp-num">${noData ? "—" : winStr}</span>` +
+                `<span class="comp-num">${noData ? "—" : evStr}</span>` +
+                `<span class="comp-spark">${spark || "—"}</span>` +
+                `</div>`;
+        }
+
+        html += `</div>`;
+
+        const ts = data.generated_at
+            ? new Date(data.generated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+            : "";
+        html += `<div class="comp-footer">Updated ${ts} · auto-refreshes every 30s</div>`;
+
+        panel.innerHTML = html;
+    }
+
+    // =========================================================================
+    // WebSocket connection (main thread only)
     // =========================================================================
     let pollInterval = null;
 
@@ -424,7 +603,8 @@
 
         ws.onmessage = function (event) {
             const msg = JSON.parse(event.data);
-            if (msg.data) {
+            // WebSocket only carries main-thread data — skip if viewing a variant
+            if (msg.data && currentSource === "main") {
                 updateDashboard(msg.data);
             }
         };
@@ -432,7 +612,6 @@
         ws.onclose = function () {
             setConnectionStatus("polling");
             startPolling();
-            // Reconnect with exponential backoff
             setTimeout(connectWebSocket, reconnectDelay);
             reconnectDelay = Math.min(reconnectDelay * 2, 30000);
         };
@@ -443,16 +622,22 @@
     }
 
     // =========================================================================
-    // Polling fallback
+    // Polling fallback (source-aware)
     // =========================================================================
     function startPolling() {
         if (pollInterval) return;
         pollInterval = setInterval(async function () {
             try {
-                const resp = await fetch("/api/dashboard");
+                if (currentSource === "comparison") {
+                    await refreshComparison();
+                    return;
+                }
+                const url = currentSource === "main"
+                    ? "/api/dashboard"
+                    : `/api/source/${currentSource}/dashboard`;
+                const resp = await fetch(url);
                 if (resp.ok) {
-                    const data = await resp.json();
-                    updateDashboard(data);
+                    updateDashboard(await resp.json());
                     setConnectionStatus("polling");
                 } else {
                     setConnectionStatus("offline");
@@ -468,8 +653,8 @@
     // =========================================================================
     updateDashboard(DATA);
     connectWebSocket();
+    initSourceSelector();
 
-    // Keep WebSocket alive with pings
     setInterval(function () {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send("ping");

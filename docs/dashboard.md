@@ -12,11 +12,12 @@ A real-time operations center for WeatherBot. Reads the JSON files written by `w
 4. [REST API Endpoints](#rest-api-endpoints)
 5. [WebSocket](#websocket)
 6. [KPI Calculations](#kpi-calculations)
-7. [Activity Feed](#activity-feed)
-8. [Bot Status Detection](#bot-status-detection)
-9. [File Watcher](#file-watcher)
-10. [Python Patterns & Code Notes](#python-patterns--code-notes)
-11. [Function Reference](#function-reference)
+7. [Strategy Comparison View](#strategy-comparison-view)
+8. [Activity Feed](#activity-feed)
+9. [Bot Status Detection](#bot-status-detection)
+10. [File Watcher](#file-watcher)
+11. [Python Patterns & Code Notes](#python-patterns--code-notes)
+12. [Function Reference](#function-reference)
 
 ---
 
@@ -111,26 +112,34 @@ venv/bin/pip install -r requirements.txt
 dashboard.py
 ├── Data reading layer
 │   ├── read_json()             — safe JSON file loader
-│   ├── read_state()            — loads data/state.json with defaults
-│   ├── read_all_markets()      — loads all data/markets/*.json
-│   └── read_calibration()      — loads data/calibration.json
+│   ├── read_state()            — loads state.json with defaults (path arg optional)
+│   ├── read_all_markets()      — loads all markets/*.json (path arg optional)
+│   └── read_calibration()      — loads calibration.json (path arg optional)
 │
 ├── Aggregation layer
-│   ├── build_dashboard_data()  — full payload for Bloomberg dashboard
+│   ├── build_dashboard_data(data_dir, *, is_variant)
+│   │                           — full payload; is_variant=True skips shared state mutation
 │   ├── detect_changes()        — diffs market snapshots → activity events
 │   └── check_bot_status()      — inspects running processes via psutil
 │
+├── Strategy variant helpers
+│   ├── _variant_pid_running()  — checks runs/<name>/weatherbot.pid
+│   └── _equity_series()        — 50-point equity replay for sparklines
+│
 ├── FastAPI app
-│   ├── GET  /                     — Bloomberg dark dashboard (Jinja2)
-│   ├── GET  /retro                — Retro terminal dashboard (sim_dashboard_report.html)
-│   ├── GET  /simulation.json      — Retro dashboard data feed
-│   ├── GET  /api/state            — raw state.json
-│   ├── GET  /api/markets          — all market files
-│   ├── GET  /api/markets/{city}/{date}  — single market file
-│   ├── GET  /api/calibration      — calibration.json
-│   ├── GET  /api/bot-status       — process status
-│   ├── GET  /api/dashboard        — full aggregated payload
-│   └── WS   /ws                   — WebSocket push channel
+│   ├── GET  /                          — Bloomberg dark dashboard (Jinja2)
+│   ├── GET  /retro                     — Retro terminal dashboard
+│   ├── GET  /simulation.json           — Retro dashboard data feed
+│   ├── GET  /api/state                 — raw state.json
+│   ├── GET  /api/markets               — all market files
+│   ├── GET  /api/markets/{city}/{date} — single market file
+│   ├── GET  /api/calibration           — calibration.json
+│   ├── GET  /api/bot-status            — process status
+│   ├── GET  /api/dashboard             — full aggregated payload (main thread)
+│   ├── GET  /api/variants              — configured variants + running status
+│   ├── GET  /api/source/{name}/dashboard — variant dashboard payload
+│   ├── GET  /api/comparison            — compact P&L summary for all sources
+│   └── WS   /ws                        — WebSocket push channel
 │
 └── Background tasks
     └── watch_data_directory()  — async file watcher, pushes updates to WS clients
@@ -211,6 +220,63 @@ Returns `"running": false` with zeroed metrics if the bot is not running.
 Returns the full aggregated payload used by the Bloomberg UI. This is the same data served on WebSocket connect and on every file-change push.
 
 See [KPI Calculations](#kpi-calculations) for payload structure.
+
+### `GET /api/variants`
+
+Returns the list of configured strategy variants and their running state.
+
+```json
+{
+  "main_running": true,
+  "variants": [
+    { "name": "baseline",   "label": "baseline",   "running": true  },
+    { "name": "prob_model", "label": "prob_model",  "running": false },
+    { "name": "time_decay", "label": "time_decay",  "running": false }
+  ]
+}
+```
+
+A variant appears in the list only if `runs/<name>/config.json` exists. `main_running` is `true` if `data/state.json` exists.
+
+### `GET /api/source/{name}/dashboard`
+
+Returns the full dashboard payload for a single strategy variant, reading from `runs/<name>/data/` instead of `data/`. The name must be one of the configured `STRATEGY_VARIANTS` (`baseline`, `prob_model`, `time_decay`, `dynamic_ev`, `combined`); any other value returns HTTP 404.
+
+`balance_history` and `activity` are always `[]` for variant payloads — only the main thread maintains those in-memory structures.
+
+### `GET /api/comparison`
+
+Returns a compact P&L summary for all active sources (main thread + all configured variants).
+
+```json
+{
+  "sources": [
+    {
+      "name":     "main",
+      "label":    "Main thread",
+      "balance":  10234.50,
+      "pnl":      234.50,
+      "roi":      2.35,
+      "trades":   47,
+      "wins":     31,
+      "win_rate": 66.0,
+      "avg_ev":   0.1420,
+      "flags":    [],
+      "running":  true,
+      "series":   [1000.0, 1012.0, ...]
+    },
+    {
+      "name":    "prob_model",
+      "flags":   ["prob_model_normal_cdf"],
+      "series":  [1000.0, 1018.0, ...],
+      ...
+    }
+  ],
+  "generated_at": "2026-04-25T19:00:00+00:00"
+}
+```
+
+`series` is a list of up to 50 equity values (starting from 1000.0) used to draw sparklines. `flags` lists only the strategy keys set to `true` in the variant's config. Main thread always shows `flags: []`.
 
 ### `GET /simulation.json`
 
@@ -358,6 +424,31 @@ Closed positions are sorted by `closed_at` descending (most recent first).
 
 ---
 
+## Strategy Comparison View
+
+When strategy variants are configured (via `strategies/runner.py setup`), a **source selector** dropdown appears in the dashboard status bar. It lists the main thread and all variants whose `runs/<name>/config.json` exists; only running sources are selectable.
+
+Selecting **"comparison"** switches the main panel to a Bloomberg-style table populated from `/api/comparison`:
+
+| Column | Description |
+|---|---|
+| Source | Variant name and active strategy flags |
+| Balance | Current equity |
+| P&L | Total realized P&L |
+| ROI | Return on starting balance (%) |
+| Trades | Number of closed positions |
+| Win % | Win rate of closed positions |
+| Avg EV | Mean expected value at entry |
+| Equity | 50-point sparkline of equity replay |
+
+The row with the highest P&L gets a green left-border highlight and a `←` marker.
+
+Selecting any individual variant (e.g. `"prob_model"`) switches the entire Bloomberg panel to that variant's data, sourced from `/api/source/{name}/dashboard`. The WebSocket feed is suppressed while viewing a variant — it only pushes data for the main thread.
+
+The source selector is hidden when no variants exist. It is populated by `/api/variants` on page load and on each 60-second poll tick.
+
+---
+
 ## Activity Feed
 
 `detect_changes(old_markets, new_markets)` diffs two market snapshots and generates events for the activity feed. Three event types are detected:
@@ -480,17 +571,24 @@ state = await asyncio.to_thread(read_state)
 | Function | Signature | Returns |
 |---|---|---|
 | `read_json` | `(path: Path) -> Optional[dict]` | Parsed JSON or `None` |
-| `read_state` | `() -> dict` | State with safe defaults |
-| `read_all_markets` | `() -> dict` | All market files keyed by stem |
-| `read_calibration` | `() -> Optional[dict]` | Calibration data or `None` |
+| `read_state` | `(state_file: Path = STATE_FILE) -> dict` | State with safe defaults |
+| `read_all_markets` | `(markets_dir: Path = MARKETS_DIR) -> dict` | All market files keyed by stem |
+| `read_calibration` | `(calibration_file: Path = CALIBRATION_FILE) -> Optional[dict]` | Calibration data or `None` |
 | `check_bot_status` | `() -> dict` | Process status from psutil |
 
 ### Aggregation
 
-| Function | Description |
-|---|---|
-| `detect_changes(old, new)` | Diffs two market dicts, returns list of activity events |
-| `build_dashboard_data()` | Assembles and returns the full dashboard payload |
+| Function | Signature | Description |
+|---|---|---|
+| `detect_changes` | `(old, new)` | Diffs two market dicts, returns list of activity events |
+| `build_dashboard_data` | `(data_dir=DATA_DIR, *, is_variant=False)` | Assembles dashboard payload; `is_variant=True` skips `balance_history` / `activity` mutation |
+
+### Strategy Variant Helpers
+
+| Function | Signature | Description |
+|---|---|---|
+| `_variant_pid_running` | `(name: str) -> bool` | Checks if variant process is alive via `runs/<name>/weatherbot.pid` |
+| `_equity_series` | `(markets_dir: Path) -> list[float]` | Replays closed-position PnL from 1000.0, returns last 50 equity points |
 
 ### FastAPI Routes
 
@@ -504,7 +602,10 @@ state = await asyncio.to_thread(read_state)
 | `GET` | `/api/markets/{city}/{date}` | Single market file (404 if missing) |
 | `GET` | `/api/calibration` | `calibration.json` or `{}` |
 | `GET` | `/api/bot-status` | Bot process status |
-| `GET` | `/api/dashboard` | Full aggregated payload |
+| `GET` | `/api/dashboard` | Full aggregated payload (main thread) |
+| `GET` | `/api/variants` | Configured variants + running status |
+| `GET` | `/api/source/{name}/dashboard` | Variant dashboard payload (404 for unknown name) |
+| `GET` | `/api/comparison` | Compact P&L summary — all sources with sparkline series |
 | `WS` | `/ws` | WebSocket push channel |
 
 ### WebSocket & Broadcasting

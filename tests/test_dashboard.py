@@ -240,6 +240,35 @@ class TestApiComparison(unittest.TestCase):
         self.assertIn("prob_model_normal_cdf", variant["flags"])
         self.assertNotIn("time_decay", variant["flags"])
 
+    def test_roi_positive_when_cash_balance_reduced_by_open_costs(self):
+        """ROI must use realized P&L, not cash balance.
+
+        When an open bet costs $20, cash balance drops below starting even
+        though closed-trade P&L is positive.  The old formula produced a
+        negative ROI in that situation.
+        """
+        d = self.tmp / "baseline"
+        d.mkdir(parents=True)
+        (d / "config.json").write_text(json.dumps({}), encoding="utf-8")
+        data_dir = d / "data"
+        data_dir.mkdir()
+        # balance is lower than starting because an open bet consumed $20
+        (data_dir / "state.json").write_text(
+            json.dumps({"starting_balance": 1000.0, "balance": 980.0}), encoding="utf-8"
+        )
+        markets = data_dir / "markets"
+        markets.mkdir()
+        (markets / "nyc.json").write_text(
+            json.dumps({"position": {"status": "closed", "pnl": 0.85}}), encoding="utf-8"
+        )
+        with (
+            patch.object(dashboard, "STATE_FILE", self.tmp / "state.json"),
+            patch.object(dashboard, "RUNS_DIR", self.tmp),
+        ):
+            resp = client.get("/api/comparison")
+        variant = next(s for s in resp.json()["sources"] if s["name"] == "baseline")
+        self.assertGreater(variant["roi"], 0, "ROI must be positive when P&L is positive")
+
     def test_variant_pnl_summed_from_closed_positions(self):
         d = self.tmp / "baseline"
         d.mkdir(parents=True)

@@ -10,7 +10,12 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import dashboard
-from dashboard import _equity_series, _variant_pid_running, build_dashboard_data
+from dashboard import (
+    _build_variant_balance_history,
+    _equity_series,
+    _variant_pid_running,
+    build_dashboard_data,
+)
 from fastapi.testclient import TestClient
 
 client = TestClient(dashboard.app)
@@ -19,6 +24,59 @@ _MOCK_BOT_STATUS = {
     "running": False, "pid": None,
     "cpu_percent": 0.0, "memory_mb": 0.0, "uptime_seconds": 0,
 }
+
+
+class TestBuildVariantBalanceHistory(unittest.TestCase):
+
+    def test_empty_returns_empty(self):
+        self.assertEqual(_build_variant_balance_history([], 1000.0), [])
+
+    def test_missing_closed_at_skipped(self):
+        positions = [{"pnl": 10.0}]  # no closed_at key
+        self.assertEqual(_build_variant_balance_history(positions, 1000.0), [])
+
+    def test_single_trade_produces_one_point(self):
+        positions = [{"closed_at": "2026-04-01T10:00:00", "pnl": 5.0}]
+        result = _build_variant_balance_history(positions, 1000.0)
+        self.assertEqual(len(result), 1)
+        self.assertAlmostEqual(result[0]["balance"], 1005.0, places=2)
+
+    def test_replay_is_chronological(self):
+        positions = [
+            {"closed_at": "2026-04-02T10:00:00", "pnl": -3.0},
+            {"closed_at": "2026-04-01T10:00:00", "pnl": 10.0},  # earlier, listed second
+        ]
+        result = _build_variant_balance_history(positions, 1000.0)
+        self.assertEqual(len(result), 2)
+        self.assertAlmostEqual(result[0]["balance"], 1010.0, places=2)  # first event
+        self.assertAlmostEqual(result[1]["balance"], 1007.0, places=2)  # second event
+
+    def test_variant_api_chart_populated_from_closed_trades(self):
+        """Switching to a stopped variant must show its own balance curve, not an empty chart."""
+        import tempfile, shutil
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            (tmp / "state.json").write_text(
+                json.dumps({"starting_balance": 1000.0, "balance": 1008.0}), encoding="utf-8"
+            )
+            markets = tmp / "markets"
+            markets.mkdir(parents=True)
+            (markets / "nyc.json").write_text(
+                json.dumps({
+                    "city": "nyc", "city_name": "New York City", "date": "2026-04-01",
+                    "position": {"status": "closed", "pnl": 8.0,
+                                 "closed_at": "2026-04-01T12:00:00"},
+                }),
+                encoding="utf-8",
+            )
+            result = build_dashboard_data(data_dir=tmp, is_variant=True)
+            history = result["balance_history"]
+            self.assertGreater(len(history), 0, "variant balance_history must not be empty when trades exist")
+            self.assertIn("ts", history[0])
+            self.assertIn("balance", history[0])
+            self.assertAlmostEqual(history[-1]["balance"], 1008.0, places=2)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class TestEquitySeries(unittest.TestCase):

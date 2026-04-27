@@ -344,7 +344,7 @@ def build_dashboard_data(
         "forecasts": forecasts,
         "calibration": calibration,
         "bot_status": bot_status,
-        "balance_history": balance_history if not is_variant else [],
+        "balance_history": balance_history if not is_variant else _build_variant_balance_history(closed_positions, starting),
         "activity": list(activity_feed) if not is_variant else [],
         "locations": LOCATIONS,
     }
@@ -426,6 +426,23 @@ def _variant_pid_running(name: str) -> bool:
         return True
     except (ValueError, OSError):
         return False
+
+
+def _build_variant_balance_history(closed_positions: list, starting: float) -> list:
+    """Reconstruct [{ts, balance}] from closed positions for variant balance charts."""
+    events = sorted(
+        [(p["closed_at"], p.get("pnl", 0) or 0)
+         for p in closed_positions if p.get("closed_at")],
+        key=lambda x: x[0],
+    )
+    if not events:
+        return []
+    running = starting
+    history = []
+    for ts, pnl_val in events:
+        running += pnl_val
+        history.append({"ts": ts, "balance": round(running, 2)})
+    return history
 
 
 def _equity_series(markets_dir: Path) -> list[float]:

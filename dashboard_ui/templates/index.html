@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WeatherBot // Operations Center</title>
     <link rel="stylesheet" href="/static/style.css">
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
 
@@ -72,20 +70,35 @@
 <!-- Main Grid -->
 <div class="main-grid">
 
-    <!-- LEFT: Map Panel (spans 2 rows) -->
+    <!-- LEFT: City Positions (spans 2 rows) -->
     <div class="panel panel-map">
         <div class="panel-header">
-            <span>World Map</span>
+            <span>City Positions</span>
             <span class="count">{{ data.locations|length }} cities</span>
         </div>
-        <div id="map"></div>
-        <div class="city-cards" id="city-cards">
-            {% for key, m in data.locations.items() %}
-            <div class="city-card" id="card-{{ key }}">
-                <div class="city-code">{{ key.upper()[:3] }}</div>
-                <div class="city-detail">{{ m.name }}</div>
+        <div class="city-table" role="table" aria-label="City positions">
+            <div class="city-table-header">
+                <span>Code</span>
+                <span>City</span>
+                <span>Temp</span>
+                <span>Status</span>
+                <span>Bucket</span>
+                <span>P&amp;L</span>
+                <span>σ</span>
             </div>
-            {% endfor %}
+            <div class="city-table-body" id="city-table-body">
+                {% for key, loc in data.locations.items() %}
+                <div class="city-table-row">
+                    <span class="city-table-code">{{ key.upper()[:3] }}</span>
+                    <span class="city-table-name">{{ loc.name }}</span>
+                    <span class="city-table-temp">—</span>
+                    <span class="text-muted">—</span>
+                    <span class="city-table-bucket">—</span>
+                    <span class="city-table-pnl">—</span>
+                    <span class="city-table-sigma text-muted">—</span>
+                </div>
+                {% endfor %}
+            </div>
         </div>
     </div>
 
@@ -163,7 +176,7 @@
         </div>
         <div class="positions-table">
             <div class="table-header">
-                <span>City</span><span>Bucket</span><span>Entry → Now</span><span>EV</span><span>Kelly</span><span>P&L</span>
+                <span>City</span><span>Date</span><span>Bucket</span><span>Entry → Now</span><span>EV</span><span>Kelly</span><span>P&L</span>
             </div>
             <div class="table-body" id="positions-body">
                 {% for p in data.open_positions %}
@@ -232,7 +245,6 @@
 <div id="comparison-panel" style="display:none"></div>
 
 <!-- Scripts -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
 <!-- Pass server data to JS -->
 <script>

@@ -12,107 +12,77 @@
     let currentSource = "main";
 
     // =========================================================================
-    // Leaflet Map
+    // City Position Table
     // =========================================================================
-    const map = L.map("map", {
-        zoomControl: false,
-        attributionControl: false,
-    }).setView([20, 0], 2);
+    function updateCityTable(data) {
+        const forecasts   = data.forecasts        || [];
+        const openPos     = data.open_positions   || [];
+        const closedPos   = data.closed_positions || [];
+        const locations   = data.locations        || {};
+        const calibration = data.calibration      || {};
 
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-        maxZoom: 18,
-    }).addTo(map);
-
-    const markers = {};
-
-    function buildMarkerHtml(city, loc, forecasts, positions) {
-        const code = city.toUpperCase().slice(0, 3);
-        const forecast = forecasts.find(f => f.city === city);
-        const position = positions.find(p => p.city === city);
-
-        let temp = "";
-        let evText = "";
-        let dotColor = "#8b949e";
-
-        if (forecast) {
-            temp = forecast.best + "°" + forecast.unit;
-        }
-        if (position) {
-            const ev = position.ev || 0;
-            evText = (ev >= 0 ? "+" : "") + ev.toFixed(2);
-            const pnl = position.pnl || 0;
-            dotColor = pnl >= 0 ? "#3fb950" : "#f85149";
+        // closed_positions arrive sorted descending by closed_at — first hit per city is newest
+        const lastClosed = {};
+        for (const p of closedPos) {
+            if (!lastClosed[p.city]) lastClosed[p.city] = p;
         }
 
-        return `<div class="city-marker">` +
-            `<span class="code">${code}</span>` +
-            `<span class="temp">${temp}</span>` +
-            (evText ? `<span class="ev" style="color:${dotColor}">${evText}</span>` : "") +
-            `</div>`;
-    }
-
-    function buildPopupHtml(city, loc, forecasts, positions) {
-        const forecast = forecasts.find(f => f.city === city);
-        const position = positions.find(p => p.city === city);
-
-        let html = `<div class="popup-detail">`;
-        html += `<div style="font-weight:600;font-size:13px;margin-bottom:4px;">${loc.name}</div>`;
-
-        if (forecast) {
-            html += `<div class="label">Forecasts</div>`;
-            html += `<div class="value">ECMWF: ${forecast.ecmwf ?? "—"}° | HRRR: ${forecast.hrrr ?? "—"}° | METAR: ${forecast.metar ?? "—"}°</div>`;
-            html += `<div class="value">Best: <span style="color:#3fb950;font-weight:600;">${forecast.best}°${forecast.unit}</span> (${(forecast.best_source || "").toUpperCase()})</div>`;
-            html += `<div class="value">Horizon: ${forecast.horizon || "—"} | Date: ${forecast.date || "—"}</div>`;
-        }
-
-        if (position) {
-            html += `<div class="label" style="margin-top:6px;">Position</div>`;
-            html += `<div class="value">Bucket: ${position.bucket_low}-${position.bucket_high}°${position.unit}</div>`;
-            html += `<div class="value">Entry: $${position.entry_price?.toFixed(3)} | Cost: $${position.cost?.toFixed(0)}</div>`;
-            html += `<div class="value">EV: +${position.ev?.toFixed(2)} | Kelly: ${position.kelly?.toFixed(2)} | σ: ${position.sigma?.toFixed(1)}</div>`;
-            const pnl = position.pnl;
-            if (pnl !== null && pnl !== undefined) {
-                const color = pnl >= 0 ? "#3fb950" : "#f85149";
-                html += `<div class="value">P&L: <span style="color:${color};font-weight:600;">$${pnl.toFixed(2)}</span></div>`;
+        // minimum sigma across any source with n≥10 for a given city
+        function citySigma(cityKey) {
+            const prefix = cityKey + "_";
+            let min = null;
+            for (const [k, v] of Object.entries(calibration)) {
+                if (k.startsWith(prefix) && v.n >= 10) {
+                    if (min === null || v.sigma < min) min = v.sigma;
+                }
             }
+            return min;
         }
 
-        html += `</div>`;
-        return html;
-    }
+        let html = "";
+        for (const [key, loc] of Object.entries(locations)) {
+            const forecast = forecasts.find(f => f.city === key);
+            const open     = openPos.find(p => p.city === key);
+            const closed   = lastClosed[key];
+            const sigma    = citySigma(key);
 
-    function updateMap(data) {
-        const locations = data.locations || {};
-        const forecasts = data.forecasts || [];
-        const positions = data.open_positions || [];
+            const temp     = (forecast && forecast.best != null) ? `${forecast.best}°${forecast.unit}` : "—";
+            const sigmaStr = sigma !== null ? sigma.toFixed(1) : "—";
 
-        for (const [city, loc] of Object.entries(locations)) {
-            const html = buildMarkerHtml(city, loc, forecasts, positions);
-            const icon = L.divIcon({
-                html: html,
-                className: "",
-                iconAnchor: [0, 0],
-            });
-
-            if (markers[city]) {
-                markers[city].setIcon(icon);
-                markers[city].setPopupContent(buildPopupHtml(city, loc, forecasts, positions));
+            let statusHtml, bucketHtml, pnlHtml;
+            if (open) {
+                const pnlCls = (open.pnl ?? 0) >= 0 ? "text-green" : "text-red";
+                const sign   = (open.pnl ?? 0) >= 0 ? "+" : "";
+                statusHtml = `<span class="city-status-open">OPEN</span>`;
+                bucketHtml = `${open.bucket_low}–${open.bucket_high}°${open.unit || ""}`;
+                pnlHtml    = `<span class="${pnlCls}">${sign}$${(open.pnl ?? 0).toFixed(2)}</span>`;
+            } else if (closed) {
+                const pnlCls = (closed.pnl ?? 0) >= 0 ? "text-green" : "text-red";
+                const sign   = (closed.pnl ?? 0) >= 0 ? "+" : "";
+                statusHtml = `<span class="city-status-closed">CLOSED</span>`;
+                bucketHtml = closed.bucket_low != null
+                    ? `${closed.bucket_low}–${closed.bucket_high}°${closed.unit || ""}`
+                    : "—";
+                pnlHtml    = `<span class="${pnlCls}">${sign}$${(closed.pnl ?? 0).toFixed(2)}</span>`;
             } else {
-                markers[city] = L.marker([loc.lat, loc.lon], { icon: icon })
-                    .addTo(map)
-                    .bindPopup(buildPopupHtml(city, loc, forecasts, positions), {
-                        maxWidth: 280,
-                    });
+                statusHtml = `<span class="text-muted">—</span>`;
+                bucketHtml = "—";
+                pnlHtml    = "—";
             }
+
+            html += `<div class="city-table-row">` +
+                `<span class="city-table-code">${key.toUpperCase().slice(0, 3)}</span>` +
+                `<span class="city-table-name">${loc.name}</span>` +
+                `<span class="city-table-temp">${temp}</span>` +
+                `<span>${statusHtml}</span>` +
+                `<span class="city-table-bucket">${bucketHtml}</span>` +
+                `<span class="city-table-pnl">${pnlHtml}</span>` +
+                `<span class="city-table-sigma text-muted">${sigmaStr}</span>` +
+                `</div>`;
         }
 
-        if (!map._boundsSet) {
-            const bounds = Object.values(locations).map(l => [l.lat, l.lon]);
-            if (bounds.length > 0) {
-                map.fitBounds(bounds, { padding: [20, 20] });
-                map._boundsSet = true;
-            }
-        }
+        const body = document.getElementById("city-table-body");
+        body.innerHTML = html || `<div class="empty-state">No city data</div>`;
     }
 
     // =========================================================================
@@ -182,37 +152,6 @@
     }
 
     // =========================================================================
-    // Update city cards
-    // =========================================================================
-    function updateCityCards(data) {
-        const container = document.getElementById("city-cards");
-        const forecasts = data.forecasts || [];
-        const positions = data.open_positions || [];
-        const locations = data.locations || {};
-
-        let html = "";
-        for (const [key, loc] of Object.entries(locations)) {
-            const forecast = forecasts.find(f => f.city === key);
-            const position = positions.find(p => p.city === key);
-
-            let statusClass = "";
-            if (position) {
-                statusClass = (position.pnl || 0) >= 0 ? "profitable" : "losing";
-            }
-
-            const temp = forecast ? `${forecast.best}°${forecast.unit}` : "—";
-            const bucket = position ? `${position.bucket_low}-${position.bucket_high}` : "—";
-            const price = position ? `$${position.entry_price.toFixed(2)}` : "—";
-
-            html += `<div class="city-card ${statusClass}">` +
-                `<div class="city-code">${key.toUpperCase().slice(0, 3)}</div>` +
-                `<div class="city-detail">${temp} → ${bucket} @ ${price}</div>` +
-                `</div>`;
-        }
-        container.innerHTML = html;
-    }
-
-    // =========================================================================
     // Update KPIs
     // =========================================================================
     function updateKPIs(kpi) {
@@ -259,6 +198,7 @@
 
             html += `<div class="table-row">` +
                 `<span>${p.city.toUpperCase().slice(0, 3)}</span>` +
+                `<span style="font-family:var(--font-mono);font-size:9px;color:var(--text-secondary)">${p.date || "—"}</span>` +
                 `<span>${p.bucket_low}-${p.bucket_high}°${p.unit}</span>` +
                 `<span>$${p.entry_price.toFixed(3)} → ${curPrice}</span>` +
                 `<span class="text-green">+${p.ev.toFixed(2)}</span>` +
@@ -388,9 +328,8 @@
     // =========================================================================
     function updateDashboard(data) {
         updateKPIs(data.kpi);
-        updateMap(data);
+        updateCityTable(data);
         updateChart(data.balance_history);
-        updateCityCards(data);
         updatePositions(data.open_positions || []);
         updateHistory(data.closed_positions || []);
         updateForecasts(data.forecasts || []);

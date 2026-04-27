@@ -252,6 +252,33 @@ class TestApiSourceDashboard(unittest.TestCase):
             resp = client.get("/api/source/baseline/dashboard")
         self.assertFalse(resp.json()["bot_status"]["running"])
 
+    def test_stopped_variant_still_returns_valid_kpi(self):
+        """A stopped variant must expose its trade data — operators need to view it.
+
+        The selector previously disabled stopped variants entirely; the fix keeps
+        them selectable and relies on this endpoint being reachable regardless of
+        running state.
+        """
+        markets_dir = self.tmp / "baseline" / "data" / "markets"
+        markets_dir.mkdir(parents=True)
+        (markets_dir / "nyc.json").write_text(
+            json.dumps({
+                "city": "nyc", "city_name": "New York City", "date": "2026-04-01",
+                "position": {"status": "closed", "pnl": 12.5,
+                             "closed_at": "2026-04-01T14:00:00"},
+            }),
+            encoding="utf-8",
+        )
+        with (
+            patch.object(dashboard, "RUNS_DIR", self.tmp),
+            patch.object(dashboard, "_variant_pid_running", return_value=False),
+        ):
+            resp = client.get("/api/source/baseline/dashboard")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertFalse(data["bot_status"]["running"])
+        self.assertAlmostEqual(data["kpi"]["realized_pnl"], 12.5, places=2)
+
 
 class TestApiComparison(unittest.TestCase):
 

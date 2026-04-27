@@ -431,9 +431,8 @@
             sel.appendChild(new Option("Main thread", "main"));
         }
         variants.forEach(v => {
-            const opt = new Option(v.label, v.name);
-            if (!v.running) opt.disabled = true;
-            sel.appendChild(opt);
+            const label = v.running ? v.label : `${v.label} (stopped)`;
+            sel.appendChild(new Option(label, v.name));
         });
         sel.appendChild(new Option("— Comparison —", "comparison"));
 

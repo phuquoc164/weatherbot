@@ -13,6 +13,7 @@ Usage:
 import json
 import asyncio
 import argparse
+from contextlib import asynccontextmanager
 import os
 from collections import deque
 from datetime import datetime, timezone
@@ -353,7 +354,12 @@ def build_dashboard_data(
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="WeatherBot Operations Center", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app):
+    asyncio.create_task(watch_data_directory())
+    yield
+
+app = FastAPI(title="WeatherBot Operations Center", version="1.0.0", lifespan=lifespan)
 
 # Mount static files if the directory exists
 _static_dir = BASE_DIR / "dashboard_ui" / "static"
@@ -767,10 +773,6 @@ async def watch_data_directory():
             await broadcast({"type": "full_update", "data": data})
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Launch the file-watcher as a background task on app startup."""
-    asyncio.create_task(watch_data_directory())
 
 # =============================================================================
 # ENTRY POINT

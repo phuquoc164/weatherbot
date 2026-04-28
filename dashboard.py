@@ -200,6 +200,123 @@ def detect_changes(old_markets: dict, new_markets: dict) -> list[dict]:
 # =============================================================================
 
 
+def _resolve_current_price(market: dict, position: dict) -> tuple[float, float]:
+    """Return (current_bid_price, unrealized_pnl) for an open position."""
+    entry    = position.get("entry_price", 0)
+    current  = entry
+    market_id = position.get("market_id")
+    if market_id:
+        for o in market.get("all_outcomes", []):
+            if o.get("market_id") == market_id:
+                current = o.get("bid", o.get("price", entry))
+                break
+    unrealized = round((current - entry) * position.get("shares", 0), 2)
+    return current, unrealized
+
+
+def _project_open_position(market: dict, position: dict) -> dict:
+    """Project an open position into the dashboard payload format."""
+    current_price, unrealized_pnl = _resolve_current_price(market, position)
+    return {
+        "city":          market["city"],
+        "city_name":     market.get("city_name", market["city"]),
+        "date":          market["date"],
+        "unit":          market.get("unit", "F"),
+        "bucket_low":    position.get("bucket_low"),
+        "bucket_high":   position.get("bucket_high"),
+        "entry_price":   position.get("entry_price", 0),
+        "current_price": current_price,
+        "ev":            position.get("ev"),
+        "kelly":         position.get("kelly"),
+        "cost":          position.get("cost"),
+        "pnl":           unrealized_pnl,
+        "forecast_src":  position.get("forecast_src"),
+        "sigma":         position.get("sigma"),
+    }
+
+
+def _project_closed_position(market: dict, position: dict) -> dict:
+    """Project a closed position into the dashboard payload format."""
+    return {
+        "city":         market["city"],
+        "city_name":    market.get("city_name", market["city"]),
+        "date":         market["date"],
+        "unit":         market.get("unit", "F"),
+        "bucket_low":   position.get("bucket_low"),
+        "bucket_high":  position.get("bucket_high"),
+        "entry_price":  position.get("entry_price"),
+        "exit_price":   position.get("exit_price"),
+        "pnl":          position.get("pnl", 0),
+        "cost":         position.get("cost"),
+        "close_reason": position.get("close_reason", "unknown"),
+        "closed_at":    position.get("closed_at"),
+    }
+
+
+def _project_latest_forecast(market: dict) -> Optional[dict]:
+    """Return the latest forecast snapshot for a market, or None."""
+    snaps = market.get("forecast_snapshots", [])
+    if not snaps:
+        return None
+    latest = snaps[-1]
+    return {
+        "city":        market["city"],
+        "city_name":   market.get("city_name", market["city"]),
+        "date":        market["date"],
+        "unit":        market.get("unit", "F"),
+        "horizon":     latest.get("horizon"),
+        "ecmwf":       latest.get("ecmwf"),
+        "hrrr":        latest.get("hrrr"),
+        "metar":       latest.get("metar"),
+        "best":        latest.get("best"),
+        "best_source": latest.get("best_source"),
+    }
+
+
+def _compute_equity_kpis(starting: float, open_positions: list,
+                          closed_positions: list, markets: dict) -> dict:
+    """Compute KPI fields: realized/unrealized P&L, cash, equity, win rate, drawdown."""
+    realized_pnl   = round(sum(p["pnl"] for p in closed_positions), 2)
+    unrealized_pnl = round(sum(p["pnl"] for p in open_positions), 2)
+    open_cost      = round(sum(p.get("cost", 0) for p in open_positions), 2)
+    cash           = round(starting + realized_pnl - open_cost, 2)
+    equity         = round(cash + open_cost + unrealized_pnl, 2)
+
+    wins         = sum(1 for p in closed_positions if p.get("pnl", 0) > 0)
+    total_closed = len(closed_positions)
+    win_rate     = (wins / total_closed * 100) if total_closed > 0 else None
+
+    # Replay equity chronologically to find peak for drawdown
+    events = [
+        (pos["closed_at"], pos.get("pnl", 0) or 0)
+        for m in markets.values()
+        if (pos := m.get("position")) and pos.get("status") == "closed" and pos.get("closed_at")
+    ]
+    events.sort(key=lambda x: x[0])
+    running_equity = starting
+    peak = starting
+    for _, pnl_val in events:
+        running_equity += pnl_val
+        if running_equity > peak:
+            peak = running_equity
+    if equity > peak:
+        peak = equity
+
+    drawdown = ((equity - peak) / peak * 100) if peak > 0 else 0
+
+    return {
+        "starting_balance": starting,
+        "open_cost":        open_cost,
+        "realized_pnl":     realized_pnl,
+        "cash":             cash,
+        "unrealized_pnl":   unrealized_pnl,
+        "equity":           equity,
+        "open_count":       len(open_positions),
+        "win_rate":         round(win_rate, 1) if win_rate is not None else None,
+        "drawdown":         round(drawdown, 1),
+    }
+
+
 def build_dashboard_data(
     data_dir: Path = DATA_DIR,
     *,
@@ -218,109 +335,24 @@ def build_dashboard_data(
         "memory_mb": 0.0, "uptime_seconds": 0,
     }
 
-    # Compute derived KPIs
-    open_positions = []
+    open_positions   = []
     closed_positions = []
-    forecasts = []
-    for key, m in markets.items():
+    forecasts        = []
+    for m in markets.values():
         pos = m.get("position")
         if pos and pos.get("status") == "open":
-            # Calculate unrealized PnL using bid price (what you'd actually sell at)
-            entry_price = pos.get("entry_price", 0)
-            shares = pos.get("shares", 0)
-            current_price = entry_price  # fallback
-            market_id = pos.get("market_id")
-            if market_id:
-                for o in m.get("all_outcomes", []):
-                    if o.get("market_id") == market_id:
-                        # Use bid (sell price), fall back to price
-                        current_price = o.get("bid", o.get("price", entry_price))
-                        break
-            unrealized_pnl = round((current_price - entry_price) * shares, 2)
-
-            open_positions.append({
-                "city": m["city"],
-                "city_name": m.get("city_name", m["city"]),
-                "date": m["date"],
-                "unit": m.get("unit", "F"),
-                "bucket_low": pos.get("bucket_low"),
-                "bucket_high": pos.get("bucket_high"),
-                "entry_price": entry_price,
-                "current_price": current_price,
-                "ev": pos.get("ev"),
-                "kelly": pos.get("kelly"),
-                "cost": pos.get("cost"),
-                "pnl": unrealized_pnl,
-                "forecast_src": pos.get("forecast_src"),
-                "sigma": pos.get("sigma"),
-            })
+            open_positions.append(_project_open_position(m, pos))
         elif pos and pos.get("status") == "closed":
-            closed_positions.append({
-                "city": m["city"],
-                "city_name": m.get("city_name", m["city"]),
-                "date": m["date"],
-                "unit": m.get("unit", "F"),
-                "bucket_low": pos.get("bucket_low"),
-                "bucket_high": pos.get("bucket_high"),
-                "entry_price": pos.get("entry_price"),
-                "exit_price": pos.get("exit_price"),
-                "pnl": pos.get("pnl", 0),
-                "cost": pos.get("cost"),
-                "close_reason": pos.get("close_reason", "unknown"),
-                "closed_at": pos.get("closed_at"),
-            })
+            closed_positions.append(_project_closed_position(m, pos))
+        f = _project_latest_forecast(m)
+        if f:
+            forecasts.append(f)
 
-        # Latest forecast
-        snaps = m.get("forecast_snapshots", [])
-        if snaps:
-            latest = snaps[-1]
-            forecasts.append({
-                "city": m["city"],
-                "city_name": m.get("city_name", m["city"]),
-                "date": m["date"],
-                "unit": m.get("unit", "F"),
-                "horizon": latest.get("horizon"),
-                "ecmwf": latest.get("ecmwf"),
-                "hrrr": latest.get("hrrr"),
-                "metar": latest.get("metar"),
-                "best": latest.get("best"),
-                "best_source": latest.get("best_source"),
-            })
-
-    # Sort closed positions by closed_at descending (most recent first)
     closed_positions.sort(key=lambda x: x.get("closed_at") or "", reverse=True)
 
-    # Calculate KPIs from real trade data
     starting = state.get("starting_balance", 1000.0)
-
-    realized_pnl = round(sum(p["pnl"] for p in closed_positions), 2)
-    unrealized_pnl = round(sum(p["pnl"] for p in open_positions), 2)
-    open_cost = round(sum(p.get("cost", 0) for p in open_positions), 2)
-    cash = round(starting + realized_pnl - open_cost, 2)
-    equity = round(cash + open_cost + unrealized_pnl, 2)
-
-    # Win rate from closed trades
-    wins = sum(1 for p in closed_positions if p.get("pnl", 0) > 0)
-    total_closed = len(closed_positions)
-    win_rate = (wins / total_closed * 100) if total_closed > 0 else None
-
-    # Replay equity chronologically to find peak
-    events = []
-    for key, m in markets.items():
-        pos = m.get("position")
-        if pos and pos.get("status") == "closed" and pos.get("closed_at"):
-            events.append((pos["closed_at"], pos.get("pnl", 0) or 0))
-    events.sort(key=lambda x: x[0])
-    running_equity = starting
-    peak = starting
-    for _, pnl_val in events:
-        running_equity += pnl_val
-        if running_equity > peak:
-            peak = running_equity
-    if equity > peak:
-        peak = equity
-
-    drawdown = ((equity - peak) / peak * 100) if peak > 0 else 0
+    kpi      = _compute_equity_kpis(starting, open_positions, closed_positions, markets)
+    equity   = kpi.pop("equity")  # internal use only — not exposed in the KPI strip
 
     # Track balance history (main thread only — variants must not pollute shared state)
     now_str = datetime.now(timezone.utc).isoformat()
@@ -329,25 +361,16 @@ def build_dashboard_data(
             balance_history.append({"ts": now_str, "balance": equity})
 
     return {
-        "state": state,
-        "kpi": {
-            "starting_balance": starting,
-            "open_cost": open_cost,
-            "realized_pnl": realized_pnl,
-            "cash": cash,
-            "unrealized_pnl": unrealized_pnl,
-            "open_count": len(open_positions),
-            "win_rate": round(win_rate, 1) if win_rate is not None else None,
-            "drawdown": round(drawdown, 1),
-        },
-        "open_positions": open_positions,
+        "state":           state,
+        "kpi":             kpi,
+        "open_positions":  open_positions,
         "closed_positions": closed_positions,
-        "forecasts": forecasts,
-        "calibration": calibration,
-        "bot_status": bot_status,
+        "forecasts":       forecasts,
+        "calibration":     calibration,
+        "bot_status":      bot_status,
         "balance_history": balance_history if not is_variant else _build_variant_balance_history(closed_positions, starting),
-        "activity": list(activity_feed) if not is_variant else [],
-        "locations": LOCATIONS,
+        "activity":        list(activity_feed) if not is_variant else [],
+        "locations":       LOCATIONS,
     }
 
 # =============================================================================
@@ -507,6 +530,30 @@ async def api_variant_dashboard(name: str):
     return result
 
 
+def _summarize_source(name: str, label: str, state: dict, closed: list,
+                       markets_dir: Path, running: bool, flags: list) -> dict:
+    """Build a single-source summary dict for the comparison endpoint."""
+    wins      = sum(1 for p in closed if (p.get("pnl") or 0) > 0)
+    total_pnl = round(sum(p.get("pnl") or 0 for p in closed), 2)
+    evs       = [p["ev"] for p in closed if p.get("ev") is not None]
+    start_bal = state.get("starting_balance", 1000.0)
+    balance   = state.get("balance", start_bal)
+    return {
+        "name":     name,
+        "label":    label,
+        "balance":  balance,
+        "pnl":      total_pnl,
+        "roi":      round(total_pnl / start_bal * 100, 2) if start_bal else 0.0,
+        "trades":   len(closed),
+        "wins":     wins,
+        "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
+        "avg_ev":   round(sum(evs) / len(evs), 4) if evs else None,
+        "flags":    flags,
+        "running":  running,
+        "series":   _equity_series(markets_dir),
+    }
+
+
 @app.get("/api/comparison")
 async def api_comparison():
     """Compact P&L summary of all variants and the main thread."""
@@ -519,25 +566,7 @@ async def api_comparison():
             pos for m in markets.values()
             if (pos := m.get("position")) and pos.get("status") == "closed"
         ]
-        wins      = sum(1 for p in closed if (p.get("pnl") or 0) > 0)
-        total_pnl = round(sum(p.get("pnl") or 0 for p in closed), 2)
-        evs       = [p["ev"] for p in closed if p.get("ev") is not None]
-        start_bal = state.get("starting_balance", 1000.0)
-        balance   = state.get("balance", start_bal)
-        sources.append({
-            "name":     "main",
-            "label":    "Main thread",
-            "balance":  balance,
-            "pnl":      total_pnl,
-            "roi":      round(total_pnl / start_bal * 100, 2) if start_bal else 0.0,
-            "trades":   len(closed),
-            "wins":     wins,
-            "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
-            "avg_ev":   round(sum(evs) / len(evs), 4) if evs else None,
-            "flags":    [],
-            "running":  True,
-            "series":   _equity_series(MARKETS_DIR),
-        })
+        sources.append(_summarize_source("main", "Main thread", state, closed, MARKETS_DIR, True, []))
 
     for name in STRATEGY_VARIANTS:
         vdir = RUNS_DIR / name
@@ -545,16 +574,13 @@ async def api_comparison():
             continue
 
         data_dir    = vdir / "data"
-        state_path = data_dir / "state.json"
+        state_path  = data_dir / "state.json"
         state = {}
         if state_path.exists():
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 pass
-
-        start_bal = state.get("starting_balance", 1000.0)
-        balance   = state.get("balance", start_bal)
 
         markets_dir = data_dir / "markets"
         closed = []
@@ -568,10 +594,6 @@ async def api_comparison():
                 except (json.JSONDecodeError, OSError):
                     continue
 
-        wins      = sum(1 for p in closed if (p.get("pnl") or 0) > 0)
-        total_pnl = round(sum(p.get("pnl") or 0 for p in closed), 2)
-        evs       = [p["ev"] for p in closed if p.get("ev") is not None]
-
         flags = []
         try:
             cfg   = json.loads((vdir / "config.json").read_text(encoding="utf-8"))
@@ -580,20 +602,10 @@ async def api_comparison():
         except (json.JSONDecodeError, OSError):
             pass
 
-        sources.append({
-            "name":     name,
-            "label":    name,
-            "balance":  balance,
-            "pnl":      total_pnl,
-            "roi":      round(total_pnl / start_bal * 100, 2) if start_bal else 0.0,
-            "trades":   len(closed),
-            "wins":     wins,
-            "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
-            "avg_ev":   round(sum(evs) / len(evs), 4) if evs else None,
-            "flags":    flags,
-            "running":  _variant_pid_running(name),
-            "series":   _equity_series(markets_dir),
-        })
+        sources.append(_summarize_source(
+            name, name, state, closed, markets_dir,
+            _variant_pid_running(name), flags,
+        ))
 
     return {
         "sources":      sources,
@@ -623,22 +635,13 @@ async def simulation_json():
         question  = pos.get("question") or f"Highest temp in {city_name} on {date}: {b_low}-{b_high}{unit_sym}"
 
         if pos.get("status") == "open":
-            entry_price   = pos.get("entry_price", 0)
-            current_price = entry_price
-            market_id     = pos.get("market_id")
-            if market_id:
-                for o in mkt.get("all_outcomes", []):
-                    if o.get("market_id") == market_id:
-                        current_price = o.get("bid", o.get("price", entry_price))
-                        break
-            shares     = pos.get("shares", 0)
-            unrealized = round((current_price - entry_price) * shares, 2)
+            current_price, unrealized = _resolve_current_price(mkt, pos)
 
             positions[key] = {
                 "question":      question,
                 "location":      city_name,
                 "date":          date,
-                "entry_price":   entry_price,
+                "entry_price":   pos.get("entry_price", 0),
                 "current_price": current_price,
                 "cost":          pos.get("cost", 0),
                 "pnl":           unrealized,

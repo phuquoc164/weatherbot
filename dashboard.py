@@ -13,6 +13,7 @@ Usage:
 import json
 import asyncio
 import argparse
+from contextlib import asynccontextmanager
 import os
 from collections import deque
 from datetime import datetime, timezone
@@ -344,7 +345,7 @@ def build_dashboard_data(
         "forecasts": forecasts,
         "calibration": calibration,
         "bot_status": bot_status,
-        "balance_history": balance_history if not is_variant else [],
+        "balance_history": balance_history if not is_variant else _build_variant_balance_history(closed_positions, starting),
         "activity": list(activity_feed) if not is_variant else [],
         "locations": LOCATIONS,
     }
@@ -353,7 +354,12 @@ def build_dashboard_data(
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="WeatherBot Operations Center", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app):
+    asyncio.create_task(watch_data_directory())
+    yield
+
+app = FastAPI(title="WeatherBot Operations Center", version="1.0.0", lifespan=lifespan)
 
 # Mount static files if the directory exists
 _static_dir = BASE_DIR / "dashboard_ui" / "static"
@@ -426,6 +432,23 @@ def _variant_pid_running(name: str) -> bool:
         return True
     except (ValueError, OSError):
         return False
+
+
+def _build_variant_balance_history(closed_positions: list, starting: float) -> list:
+    """Reconstruct [{ts, balance}] from closed positions for variant balance charts."""
+    events = sorted(
+        [(p["closed_at"], p.get("pnl", 0) or 0)
+         for p in closed_positions if p.get("closed_at")],
+        key=lambda x: x[0],
+    )
+    if not events:
+        return []
+    running = starting
+    history = []
+    for ts, pnl_val in events:
+        running += pnl_val
+        history.append({"ts": ts, "balance": round(running, 2)})
+    return history
 
 
 def _equity_series(markets_dir: Path) -> list[float]:
@@ -506,7 +529,7 @@ async def api_comparison():
             "label":    "Main thread",
             "balance":  balance,
             "pnl":      total_pnl,
-            "roi":      round((balance - start_bal) / start_bal * 100, 2) if start_bal else 0.0,
+            "roi":      round(total_pnl / start_bal * 100, 2) if start_bal else 0.0,
             "trades":   len(closed),
             "wins":     wins,
             "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
@@ -562,7 +585,7 @@ async def api_comparison():
             "label":    name,
             "balance":  balance,
             "pnl":      total_pnl,
-            "roi":      round((balance - start_bal) / start_bal * 100, 2) if start_bal else 0.0,
+            "roi":      round(total_pnl / start_bal * 100, 2) if start_bal else 0.0,
             "trades":   len(closed),
             "wins":     wins,
             "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
@@ -750,10 +773,6 @@ async def watch_data_directory():
             await broadcast({"type": "full_update", "data": data})
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Launch the file-watcher as a background task on app startup."""
-    asyncio.create_task(watch_data_directory())
 
 # =============================================================================
 # ENTRY POINT

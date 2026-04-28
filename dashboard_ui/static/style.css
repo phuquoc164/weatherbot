@@ -167,7 +167,7 @@ body {
     font-family: var(--font-mono);
 }
 
-/* Map panel spans 2 rows */
+/* Left panel spans 2 rows */
 .panel-map {
     grid-row: span 2;
 }
@@ -179,35 +179,112 @@ body {
     flex-direction: column;
 }
 
-#map {
-    flex: 1;
+/* ---- City Position Table ---- */
+.city-table {
+    background: var(--bg-panel);
     border-radius: 4px;
+    overflow: hidden;
+    flex: 0 0 auto;
+    max-height: 370px;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.city-table-header, .city-table-row {
+    display: grid;
+    grid-template-columns: 36px 90px 52px 50px 76px 55px 28px;
+    padding: 3px 8px;
+    font-size: 10px;
+    align-items: center;
+    gap: 4px;
+}
+
+.city-table-header {
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    font-size: 8px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    letter-spacing: 0.3px;
+}
+
+.city-table-header span:nth-child(6),
+.city-table-header span:nth-child(7) {
+    text-align: right;
+}
+
+.city-table-body {
+    overflow-y: auto;
+    flex: 1;
     min-height: 0;
 }
 
-/* ---- City Cards (below map) ---- */
-.city-cards {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 4px;
-    margin-top: 8px;
-    max-height: 140px;
-    overflow-y: auto;
-    flex-shrink: 0;
+.city-table-row {
+    color: var(--text-data);
+    border-bottom: 1px solid rgba(48, 54, 61, 0.2);
 }
 
-.city-card {
-    background: var(--bg-panel);
-    border-radius: 3px;
-    padding: 4px 6px;
-    border-left: 2px solid var(--text-secondary);
-    font-size: 10px;
+.city-table-code,
+.city-table-temp,
+.city-table-bucket,
+.city-table-pnl,
+.city-table-sigma {
+    font-family: var(--font-mono);
 }
 
-.city-card.profitable { border-left-color: var(--accent-green); }
-.city-card.losing { border-left-color: var(--accent-red); }
-.city-card .city-code { font-weight: 600; color: var(--text-primary); }
-.city-card .city-detail { color: var(--text-secondary); font-size: 9px; }
+.city-table-code {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.city-table-name {
+    color: var(--text-secondary);
+    font-size: 9px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.city-table-temp {
+    font-size: 9px;
+    color: var(--accent-blue);
+}
+
+.city-status-open {
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    color: var(--accent-green);
+    background: rgba(63, 185, 80, 0.12);
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+
+.city-status-closed {
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    color: var(--text-secondary);
+    background: rgba(139, 148, 158, 0.1);
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+
+.city-table-bucket {
+    font-size: 9px;
+    color: var(--text-secondary);
+}
+
+.city-table-pnl {
+    font-size: 9px;
+    text-align: right;
+}
+
+.city-table-sigma {
+    font-size: 9px;
+    text-align: right;
+}
 
 /* ---- Balance Chart ---- */
 .chart-container {
@@ -232,7 +309,7 @@ body {
 
 .table-header, .table-row {
     display: grid;
-    grid-template-columns: 50px 80px 110px 50px 50px 60px;
+    grid-template-columns: 36px 76px 110px 110px 46px 46px 56px;
     padding: 4px 8px;
     font-size: 10px;
     align-items: center;
@@ -332,7 +409,6 @@ body {
     overflow-y: auto;
     flex: 1;
     min-height: 0;
-    margin-top: 8px;
 }
 
 .activity-entry {
@@ -446,43 +522,6 @@ body {
     font-style: italic;
 }
 
-/* ---- Leaflet marker overrides ---- */
-.city-marker {
-    background: var(--bg-panel);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 2px 5px;
-    font-size: 9px;
-    white-space: nowrap;
-    font-family: var(--font-ui);
-    line-height: 1.3;
-}
-
-.city-marker .code { font-weight: 600; color: var(--text-primary); }
-.city-marker .temp { color: var(--text-secondary); margin: 0 3px; }
-.city-marker .ev { font-weight: 600; }
-
-.leaflet-popup-content-wrapper {
-    background: var(--bg-panel) !important;
-    color: var(--text-primary) !important;
-    border-radius: 4px !important;
-    border: 1px solid var(--border) !important;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.4) !important;
-}
-
-.leaflet-popup-tip {
-    background: var(--bg-panel) !important;
-    border: 1px solid var(--border) !important;
-}
-
-.popup-detail {
-    font-size: 11px;
-    line-height: 1.5;
-}
-
-.popup-detail .label { color: var(--text-secondary); font-size: 9px; text-transform: uppercase; }
-.popup-detail .value { color: var(--text-data); font-family: var(--font-mono); }
-
 /* ---- Source Selector ---- */
 #source-select {
     background: var(--bg-main);
@@ -505,10 +544,6 @@ body {
 #source-select:focus {
     border-color: var(--accent-green);
     box-shadow: 0 0 0 2px rgba(63,185,80,0.15);
-}
-
-#source-select option:disabled {
-    color: var(--text-secondary);
 }
 
 /* ---- Comparison Panel ---- */

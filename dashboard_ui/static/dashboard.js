@@ -142,7 +142,12 @@
     });
 
     function updateChart(history) {
-        if (!history || history.length === 0) return;
+        if (!history || history.length === 0) {
+            balanceChart.data.labels = [];
+            balanceChart.data.datasets[0].data = [];
+            balanceChart.update("none");
+            return;
+        }
         balanceChart.data.labels = history.map(h => {
             const d = new Date(h.ts);
             return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -196,13 +201,16 @@
             const pnlText = pnlSign + "$" + pnl.toFixed(2);
             const curPrice = p.current_price ? "$" + p.current_price.toFixed(3) : "—";
 
+            const evText   = p.ev   != null ? "+" + p.ev.toFixed(2)   : "—";
+            const kellyText = p.kelly != null ? p.kelly.toFixed(2) : "—";
+            const entryText = p.entry_price != null ? "$" + p.entry_price.toFixed(3) : "—";
             html += `<div class="table-row">` +
                 `<span>${p.city.toUpperCase().slice(0, 3)}</span>` +
                 `<span style="font-family:var(--font-mono);font-size:9px;color:var(--text-secondary)">${p.date || "—"}</span>` +
                 `<span>${p.bucket_low}-${p.bucket_high}°${p.unit}</span>` +
-                `<span>$${p.entry_price.toFixed(3)} → ${curPrice}</span>` +
-                `<span class="text-green">+${p.ev.toFixed(2)}</span>` +
-                `<span>${p.kelly.toFixed(2)}</span>` +
+                `<span>${entryText} → ${curPrice}</span>` +
+                `<span class="text-green">${evText}</span>` +
+                `<span>${kellyText}</span>` +
                 `<span class="${pnlClass}">${pnlText}</span>` +
                 `</div>`;
         }
@@ -280,10 +288,12 @@
             const pnlSign = pnl >= 0 ? "+" : "";
             const reason = t.close_reason || "unknown";
 
+            const entryP = t.entry_price != null ? "$" + t.entry_price.toFixed(3) : "—";
+            const exitP  = t.exit_price  != null ? "$" + t.exit_price.toFixed(3)  : "—";
             html += `<div class="history-row">` +
                 `<span>${t.city_name}</span>` +
                 `<span>${t.date}</span>` +
-                `<span>$${t.entry_price.toFixed(3)} → $${t.exit_price.toFixed(3)}</span>` +
+                `<span>${entryP} → ${exitP}</span>` +
                 `<span class="reason-badge reason-${reason}">${reason}</span>` +
                 `<span class="${pnlClass}">${pnlSign}$${pnl.toFixed(2)}</span>` +
                 `</div>`;
@@ -327,14 +337,18 @@
     // Full dashboard update
     // =========================================================================
     function updateDashboard(data) {
-        updateKPIs(data.kpi);
-        updateCityTable(data);
-        updateChart(data.balance_history);
-        updatePositions(data.open_positions || []);
-        updateHistory(data.closed_positions || []);
-        updateForecasts(data.forecasts || []);
-        updateCalibration(data.calibration);
-        updateActivity(data.activity || []);
+        try {
+            updateKPIs(data.kpi);
+            updateCityTable(data);
+            updateChart(data.balance_history);
+            updatePositions(data.open_positions || []);
+            updateHistory(data.closed_positions || []);
+            updateForecasts(data.forecasts || []);
+            updateCalibration(data.calibration);
+            updateActivity(data.activity || []);
+        } catch (e) {
+            console.error("Dashboard update error:", e);
+        }
         updateBotStatus(data.bot_status || {});
     }
 

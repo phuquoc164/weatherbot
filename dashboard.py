@@ -530,6 +530,30 @@ async def api_variant_dashboard(name: str):
     return result
 
 
+def _summarize_source(name: str, label: str, state: dict, closed: list,
+                       markets_dir: Path, running: bool, flags: list) -> dict:
+    """Build a single-source summary dict for the comparison endpoint."""
+    wins      = sum(1 for p in closed if (p.get("pnl") or 0) > 0)
+    total_pnl = round(sum(p.get("pnl") or 0 for p in closed), 2)
+    evs       = [p["ev"] for p in closed if p.get("ev") is not None]
+    start_bal = state.get("starting_balance", 1000.0)
+    balance   = state.get("balance", start_bal)
+    return {
+        "name":     name,
+        "label":    label,
+        "balance":  balance,
+        "pnl":      total_pnl,
+        "roi":      round(total_pnl / start_bal * 100, 2) if start_bal else 0.0,
+        "trades":   len(closed),
+        "wins":     wins,
+        "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
+        "avg_ev":   round(sum(evs) / len(evs), 4) if evs else None,
+        "flags":    flags,
+        "running":  running,
+        "series":   _equity_series(markets_dir),
+    }
+
+
 @app.get("/api/comparison")
 async def api_comparison():
     """Compact P&L summary of all variants and the main thread."""
@@ -542,25 +566,7 @@ async def api_comparison():
             pos for m in markets.values()
             if (pos := m.get("position")) and pos.get("status") == "closed"
         ]
-        wins      = sum(1 for p in closed if (p.get("pnl") or 0) > 0)
-        total_pnl = round(sum(p.get("pnl") or 0 for p in closed), 2)
-        evs       = [p["ev"] for p in closed if p.get("ev") is not None]
-        start_bal = state.get("starting_balance", 1000.0)
-        balance   = state.get("balance", start_bal)
-        sources.append({
-            "name":     "main",
-            "label":    "Main thread",
-            "balance":  balance,
-            "pnl":      total_pnl,
-            "roi":      round(total_pnl / start_bal * 100, 2) if start_bal else 0.0,
-            "trades":   len(closed),
-            "wins":     wins,
-            "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
-            "avg_ev":   round(sum(evs) / len(evs), 4) if evs else None,
-            "flags":    [],
-            "running":  True,
-            "series":   _equity_series(MARKETS_DIR),
-        })
+        sources.append(_summarize_source("main", "Main thread", state, closed, MARKETS_DIR, True, []))
 
     for name in STRATEGY_VARIANTS:
         vdir = RUNS_DIR / name
@@ -568,16 +574,13 @@ async def api_comparison():
             continue
 
         data_dir    = vdir / "data"
-        state_path = data_dir / "state.json"
+        state_path  = data_dir / "state.json"
         state = {}
         if state_path.exists():
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 pass
-
-        start_bal = state.get("starting_balance", 1000.0)
-        balance   = state.get("balance", start_bal)
 
         markets_dir = data_dir / "markets"
         closed = []
@@ -591,10 +594,6 @@ async def api_comparison():
                 except (json.JSONDecodeError, OSError):
                     continue
 
-        wins      = sum(1 for p in closed if (p.get("pnl") or 0) > 0)
-        total_pnl = round(sum(p.get("pnl") or 0 for p in closed), 2)
-        evs       = [p["ev"] for p in closed if p.get("ev") is not None]
-
         flags = []
         try:
             cfg   = json.loads((vdir / "config.json").read_text(encoding="utf-8"))
@@ -603,20 +602,10 @@ async def api_comparison():
         except (json.JSONDecodeError, OSError):
             pass
 
-        sources.append({
-            "name":     name,
-            "label":    name,
-            "balance":  balance,
-            "pnl":      total_pnl,
-            "roi":      round(total_pnl / start_bal * 100, 2) if start_bal else 0.0,
-            "trades":   len(closed),
-            "wins":     wins,
-            "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
-            "avg_ev":   round(sum(evs) / len(evs), 4) if evs else None,
-            "flags":    flags,
-            "running":  _variant_pid_running(name),
-            "series":   _equity_series(markets_dir),
-        })
+        sources.append(_summarize_source(
+            name, name, state, closed, markets_dir,
+            _variant_pid_running(name), flags,
+        ))
 
     return {
         "sources":      sources,

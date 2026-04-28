@@ -70,7 +70,7 @@
 <!-- Main Grid -->
 <div class="main-grid">
 
-    <!-- LEFT: City Positions (spans 2 rows) -->
+    <!-- LEFT: City Positions + Trade History (spans 2 rows) -->
     <div class="panel panel-map">
         <div class="panel-header">
             <span>City Positions</span>
@@ -98,6 +98,32 @@
                     <span class="city-table-sigma text-muted">—</span>
                 </div>
                 {% endfor %}
+            </div>
+        </div>
+
+        <div class="panel-header" style="margin-top:8px;">
+            <span>Trade History</span>
+            <span class="count" id="history-count">{{ data.closed_positions|length }} closed</span>
+        </div>
+        <div class="history-table">
+            <div class="history-header">
+                <span>City</span><span>Date</span><span>Entry → Exit</span><span>Reason</span><span>P&L</span>
+            </div>
+            <div class="history-body" id="history-body">
+                {% for t in data.closed_positions %}
+                <div class="history-row">
+                    <span>{{ t.city_name }}</span>
+                    <span>{{ t.date }}</span>
+                    <span>${{ "%.3f"|format(t.entry_price) }} → ${{ "%.3f"|format(t.exit_price) }}</span>
+                    <span class="reason-badge reason-{{ t.close_reason }}">{{ t.close_reason }}</span>
+                    <span class="{{ 'text-green' if t.pnl >= 0 else 'text-red' }}">
+                        {{ "+" if t.pnl >= 0 else "" }}${{ "%.2f"|format(t.pnl) }}
+                    </span>
+                </div>
+                {% endfor %}
+                {% if not data.closed_positions %}
+                <div class="empty-state">No closed trades yet</div>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -168,7 +194,7 @@
         </div>
     </div>
 
-    <!-- CENTER BOTTOM: Positions + Trade History + Activity -->
+    <!-- CENTER BOTTOM: Positions + Activity Feed -->
     <div class="panel" style="display:flex;flex-direction:column;">
         <div class="panel-header">
             <span>Open Positions</span>
@@ -198,32 +224,6 @@
         </div>
 
         <div class="panel-header" style="margin-top:8px;">
-            <span>Trade History</span>
-            <span class="count" id="history-count">{{ data.closed_positions|length }} closed</span>
-        </div>
-        <div class="history-table">
-            <div class="history-header">
-                <span>City</span><span>Date</span><span>Entry → Exit</span><span>Reason</span><span>P&L</span>
-            </div>
-            <div class="history-body" id="history-body">
-                {% for t in data.closed_positions %}
-                <div class="history-row">
-                    <span>{{ t.city_name }}</span>
-                    <span>{{ t.date }}</span>
-                    <span>${{ "%.3f"|format(t.entry_price) }} → ${{ "%.3f"|format(t.exit_price) }}</span>
-                    <span class="reason-badge reason-{{ t.close_reason }}">{{ t.close_reason }}</span>
-                    <span class="{{ 'text-green' if t.pnl >= 0 else 'text-red' }}">
-                        {{ "+" if t.pnl >= 0 else "" }}${{ "%.2f"|format(t.pnl) }}
-                    </span>
-                </div>
-                {% endfor %}
-                {% if not data.closed_positions %}
-                <div class="empty-state">No closed trades yet</div>
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="panel-header" style="margin-top:8px;">
             <span>Activity Feed</span>
             <span class="count">Live</span>
         </div>
@@ -235,6 +235,7 @@
             <div class="activity-entry scan">Waiting for activity...</div>
             {% endif %}
         </div>
+
     </div>
 
 </div>

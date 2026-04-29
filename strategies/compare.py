@@ -17,14 +17,13 @@ from pathlib import Path
 ROOT     = Path(__file__).parent.parent
 RUNS_DIR = ROOT / "runs"
 
-VARIANTS = ["baseline", "prob_model", "time_decay", "dynamic_ev", "combined"]
+VARIANTS = ["baseline", "prob_model", "time_decay", "dynamic_ev"]
 
 DESCRIPTIONS = {
     "baseline":   "No improvements (control)",
     "prob_model": "Normal CDF for interior buckets (#1)",
     "time_decay": "Horizon multiplier on bet size (#3)",
     "dynamic_ev": "Dynamic MIN_EV by sigma (#6)",
-    "combined":   "All three improvements combined",
 }
 
 

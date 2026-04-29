@@ -30,7 +30,7 @@ ROOT       = Path(__file__).parent.parent
 RUNS_DIR   = ROOT / "runs"
 STRATS_DIR = ROOT / "strategies" / "configs"
 
-VARIANTS = ["baseline", "prob_model", "time_decay", "dynamic_ev", "combined"]
+VARIANTS = ["baseline", "prob_model", "time_decay", "dynamic_ev"]
 
 
 # ---------------------------------------------------------------------------

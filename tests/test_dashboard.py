@@ -209,12 +209,17 @@ class TestApiSourceDashboard(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
+        # Create a discoverable variant (config.json in runs/<name>/)
+        variant_dir = self.tmp / "prob_model"
+        variant_dir.mkdir()
+        (variant_dir / "config.json").write_text("{}", encoding="utf-8")
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_unknown_variant_returns_404(self):
-        resp = client.get("/api/source/notavariant/dashboard")
+        with patch.object(dashboard, "RUNS_DIR", self.tmp):
+            resp = client.get("/api/source/notavariant/dashboard")
         self.assertEqual(resp.status_code, 404)
 
     def test_known_variant_returns_200_with_kpi(self):

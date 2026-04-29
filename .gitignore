@@ -9,3 +9,5 @@ nohup.out
 .coverage
 htmlcov/
 runs/
+strategies/configs/*.json
+!strategies/configs/example.json

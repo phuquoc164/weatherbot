@@ -38,8 +38,14 @@ STATE_FILE       = DATA_DIR / "state.json"
 MARKETS_DIR      = DATA_DIR / "markets"
 CALIBRATION_FILE = DATA_DIR / "calibration.json"
 RUNS_DIR         = BASE_DIR / "runs"
+STRATS_DIR       = BASE_DIR / "strategies" / "configs"
 
-STRATEGY_VARIANTS = ["prob_model", "time_decay", "dynamic_ev"]
+
+def _discover_variants() -> list[str]:
+    """Return sorted list of variants that have been set up in runs/."""
+    return sorted(
+        p.parent.name for p in RUNS_DIR.glob("*/config.json")
+    )
 
 # =============================================================================
 # LOCATIONS  (mirrored from weatherbot.py)
@@ -510,10 +516,7 @@ def _equity_series(markets_dir: Path) -> list[float]:
 async def api_variants():
     """List configured variants and their running status."""
     variants_info = []
-    for name in STRATEGY_VARIANTS:
-        vdir = RUNS_DIR / name
-        if not (vdir / "config.json").exists():
-            continue
+    for name in _discover_variants():
         variants_info.append({
             "name":    name,
             "label":   name,
@@ -528,7 +531,7 @@ async def api_variants():
 @app.get("/api/source/{name}/dashboard")
 async def api_variant_dashboard(name: str):
     """Return dashboard data for a specific strategy variant."""
-    if name not in STRATEGY_VARIANTS:
+    if name not in _discover_variants():
         raise HTTPException(status_code=404, detail=f"Unknown variant '{name}'")
     result = build_dashboard_data(data_dir=RUNS_DIR / name / "data", is_variant=True)
     result["bot_status"]["running"] = _variant_pid_running(name)
@@ -573,11 +576,8 @@ async def api_comparison():
         ]
         sources.append(_summarize_source("main", "Main thread", state, closed, MARKETS_DIR, True, []))
 
-    for name in STRATEGY_VARIANTS:
+    for name in _discover_variants():
         vdir = RUNS_DIR / name
-        if not (vdir / "config.json").exists():
-            continue
-
         data_dir    = vdir / "data"
         state_path  = data_dir / "state.json"
         state = {}

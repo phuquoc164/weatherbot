@@ -30,7 +30,13 @@ ROOT       = Path(__file__).parent.parent
 RUNS_DIR   = ROOT / "runs"
 STRATS_DIR = ROOT / "strategies" / "configs"
 
-VARIANTS = ["prob_model", "time_decay", "dynamic_ev"]
+
+def _discover_variants() -> list[str]:
+    """Return sorted list of variant names found in strategies/configs/ (excludes example)."""
+    return sorted(
+        p.stem for p in STRATS_DIR.glob("*.json")
+        if p.stem != "example"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +83,7 @@ def read_state(name: str) -> dict:
 
 def cmd_setup(target: str | None = None):
     """Create isolated run directories for each variant."""
-    names = [target] if target else VARIANTS
+    names = [target] if target else _discover_variants()
     for name in names:
         cfg_file = STRATS_DIR / f"{name}.json"
         if not cfg_file.exists():
@@ -107,7 +113,7 @@ def cmd_start(target: str | None = None, stagger: int = 120):
     Each bot scans every ~3600s, so a 120s stagger keeps them
     permanently offset and avoids simultaneous API bursts.
     """
-    names = [target] if target else VARIANTS
+    names = [target] if target else _discover_variants()
 
     for idx, name in enumerate(names):
         vdir = variant_dir(name)
@@ -145,7 +151,7 @@ def cmd_start(target: str | None = None, stagger: int = 120):
 
 def cmd_status(target: str | None = None):
     """Print running/stopped status and key P&L metrics."""
-    names = [target] if target else VARIANTS
+    names = [target] if target else _discover_variants()
     print(f"\n{'Variant':<16} {'Status':<10} {'Balance':>10} {'PnL':>10} {'Trades':>7}")
     print("-" * 58)
     for name in names:
@@ -168,7 +174,7 @@ def cmd_status(target: str | None = None):
 
 def cmd_stop(target: str | None = None):
     """Send SIGTERM to running variants."""
-    names = [target] if target else VARIANTS
+    names = [target] if target else _discover_variants()
     for name in names:
         pf = pid_file(name)
         if not pf.exists():

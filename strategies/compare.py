@@ -14,16 +14,29 @@ import json
 import sys
 from pathlib import Path
 
-ROOT     = Path(__file__).parent.parent
-RUNS_DIR = ROOT / "runs"
+ROOT       = Path(__file__).parent.parent
+RUNS_DIR   = ROOT / "runs"
+STRATS_DIR = ROOT / "strategies" / "configs"
 
-VARIANTS = ["prob_model", "time_decay", "dynamic_ev"]
 
-DESCRIPTIONS = {
-    "prob_model": "Normal CDF for interior buckets (#1)",
-    "time_decay": "Horizon multiplier on bet size (#3)",
-    "dynamic_ev": "Dynamic MIN_EV by sigma (#6)",
-}
+def _discover_variants() -> list[str]:
+    """Return sorted list of variant names found in strategies/configs/ (excludes example)."""
+    return sorted(
+        p.stem for p in STRATS_DIR.glob("*.json")
+        if p.stem != "example"
+    )
+
+
+def _variant_description(name: str) -> str:
+    """Read the 'description' field from the variant config, fallback to name."""
+    cfg_path = STRATS_DIR / f"{name}.json"
+    if cfg_path.exists():
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            return cfg.get("description", name)
+        except Exception:
+            pass
+    return name
 
 
 def load_variant(name: str) -> dict | None:
@@ -62,7 +75,7 @@ def load_variant(name: str) -> dict | None:
 
     return {
         "name":        name,
-        "description": DESCRIPTIONS.get(name, ""),
+        "description": _variant_description(name),
         "balance":     balance,
         "start_bal":   start_bal,
         "pnl":         round(total_pnl, 2),
@@ -117,7 +130,7 @@ def main():
     as_json = "--json" in sys.argv
 
     rows = []
-    for name in VARIANTS:
+    for name in _discover_variants():
         result = load_variant(name)
         if result:
             rows.append(result)

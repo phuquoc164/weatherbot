@@ -149,8 +149,8 @@ def get_sigma(city_slug, source="ecmwf"):
     return SIGMA_F if LOCATIONS[city_slug]["unit"] == "F" else SIGMA_C
 
 def run_calibration(markets):
-    """Recalculates sigma from resolved markets."""
-    resolved = [m for m in markets if m.get("status") == "resolved" and m.get("actual_temp") is not None]
+    """Recalculates sigma from markets where actual_temp is known."""
+    resolved = [m for m in markets if m.get("actual_temp") is not None]
     cal = load_cal()
     updated = []
 
@@ -160,9 +160,9 @@ def run_calibration(markets):
             errors = []
             for m in group:
                 snap = next((s for s in reversed(m.get("forecast_snapshots", []))
-                             if s["source"] == source), None)
-                if snap and snap.get("temp") is not None:
-                    errors.append(abs(snap["temp"] - m["actual_temp"]))
+                             if s.get(source) is not None), None)
+                if snap:
+                    errors.append(abs(snap[source] - m["actual_temp"]))
             if len(errors) < CALIBRATION_MIN:
                 continue
             mae  = sum(errors) / len(errors)
@@ -746,6 +746,29 @@ def _auto_resolve(state, now):
     return balance_delta, resolved
 
 
+def _backfill_actual_temps(now):
+    """Fetch actual_temp for expired closed markets where it was never recorded."""
+    for mkt in load_all_markets():
+        if mkt.get("actual_temp") is not None:
+            continue
+        if mkt.get("status") not in ("closed", "resolved"):
+            continue
+        end = mkt.get("event_end_date", "")
+        if not end:
+            continue
+        try:
+            end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if end_dt > now:
+            continue
+        temp = get_actual_temp(mkt["city"], mkt["date"])
+        if temp is not None:
+            mkt["actual_temp"] = temp
+            save_market(mkt)
+            time.sleep(0.3)
+
+
 def scan_and_update():
     """Main scan cycle: refresh forecasts, manage positions, open new trades."""
     global _cal
@@ -827,14 +850,16 @@ def scan_and_update():
     balance  += balance_delta
     resolved += n
 
+    _backfill_actual_temps(now)
+
     balance = calculate_balance_from_trades()
     state["balance"]      = balance
     state["peak_balance"] = max(state.get("peak_balance", balance), balance)
     save_state(state)
 
     all_mkts = load_all_markets()
-    resolved_count = len([m for m in all_mkts if m["status"] == "resolved"])
-    if resolved_count >= CALIBRATION_MIN:
+    calibration_ready = len([m for m in all_mkts if m.get("actual_temp") is not None])
+    if calibration_ready >= CALIBRATION_MIN:
         _cal = run_calibration(all_mkts)
 
     return new_pos, closed, resolved

@@ -207,7 +207,10 @@ class TestRunCalibration(unittest.TestCase):
             "status": "resolved" if resolved else "open",
             "actual_temp": actual_temp,
             "forecast_snapshots": [
-                {"source": source, "temp": forecast_temp, "ts": "2026-04-25T00:00:00"}
+                {"ecmwf": forecast_temp if source == "ecmwf" else None,
+                 "hrrr":  forecast_temp if source == "hrrr"  else None,
+                 "metar": forecast_temp if source == "metar" else None,
+                 "ts": "2026-04-25T00:00:00"}
             ],
         }
 
@@ -248,15 +251,19 @@ class TestRunCalibration(unittest.TestCase):
 
         self.assertNotIn("london_ecmwf", result)
 
-    def test_unresolved_markets_excluded(self):
-        markets = [self._market("london", actual_temp=20.0, forecast_temp=21.0, resolved=False)]
+    def test_early_exit_market_with_actual_temp_included(self):
+        # Early-exit markets (status=open) with actual_temp should still calibrate
+        markets = [
+            self._market("london", actual_temp=20.0, forecast_temp=21.0, resolved=False),
+            self._market("london", actual_temp=20.0, forecast_temp=21.0, resolved=False),
+        ]
         with (
             patch.object(weatherbot, "CALIBRATION_FILE", self.cal_path),
-            patch.object(weatherbot, "CALIBRATION_MIN", 1),
+            patch.object(weatherbot, "CALIBRATION_MIN", 2),
         ):
             result = weatherbot.run_calibration(markets)
 
-        self.assertNotIn("london_ecmwf", result)
+        self.assertIn("london_ecmwf", result)
 
     def test_calibration_written_to_file(self):
         markets = [

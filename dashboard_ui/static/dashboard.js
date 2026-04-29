@@ -195,9 +195,7 @@
     // Update KPIs
     // =========================================================================
     function updateKPIs(kpi) {
-        document.getElementById("kpi-starting").textContent = "$" + kpi.starting_balance.toFixed(2);
-        document.getElementById("kpi-open-cost").textContent = "$" + kpi.open_cost.toFixed(2);
-        document.getElementById("kpi-cash").textContent = "$" + kpi.cash.toFixed(2);
+        document.getElementById("kpi-equity").textContent = "$" + kpi.equity.toFixed(2);
 
         function setPnl(id, value) {
             const el = document.getElementById(id);
@@ -205,15 +203,27 @@
             el.textContent = (value >= 0 ? "+" : "") + "$" + value.toFixed(2);
             el.className = "kpi-value " + (value >= 0 ? "text-green" : "text-red");
         }
+
+        const totalEl = document.getElementById("kpi-total-pnl");
+        if (totalEl) {
+            const sign = kpi.total_pnl >= 0 ? "+" : "";
+            totalEl.className = "kpi-value " + (kpi.total_pnl >= 0 ? "text-green" : "text-red");
+            totalEl.childNodes[0].textContent = sign + "$" + kpi.total_pnl.toFixed(2) + " ";
+        }
+        const pctEl = document.getElementById("kpi-total-pnl-pct");
+        if (pctEl) {
+            const sign = kpi.total_pnl_pct >= 0 ? "+" : "";
+            pctEl.textContent = "(" + sign + kpi.total_pnl_pct.toFixed(1) + "%)";
+        }
+
         setPnl("kpi-realized", kpi.realized_pnl);
         setPnl("kpi-unrealized", kpi.unrealized_pnl);
 
-        document.getElementById("kpi-open").textContent = kpi.open_count;
         document.getElementById("kpi-winrate").textContent = kpi.win_rate !== null ? kpi.win_rate.toFixed(1) + "%" : "—";
 
         const ddEl = document.getElementById("kpi-drawdown");
-        ddEl.textContent = kpi.drawdown.toFixed(1) + "%";
-        ddEl.className = "kpi-value " + (kpi.drawdown < 0 ? "text-red" : "text-muted");
+        ddEl.textContent = kpi.max_drawdown.toFixed(1) + "%";
+        ddEl.className = "kpi-value " + (kpi.max_drawdown > 0 ? "text-red" : "text-muted");
     }
 
     // =========================================================================

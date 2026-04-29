@@ -27,42 +27,37 @@
 
 <!-- KPI Strip -->
 <div class="kpi-strip" id="kpi-strip">
-    <div class="kpi-card">
-        <div class="kpi-label">Starting Balance</div>
-        <div class="kpi-value" id="kpi-starting">${{ "%.2f"|format(data.kpi.starting_balance) }}</div>
+    <div class="kpi-card kpi-card--primary">
+        <div class="kpi-label">Total Balance</div>
+        <div class="kpi-value" id="kpi-equity">${{ "%.2f"|format(data.kpi.equity) }}</div>
     </div>
     <div class="kpi-card">
-        <div class="kpi-label">Open Positions Cost</div>
-        <div class="kpi-value text-yellow" id="kpi-open-cost">${{ "%.2f"|format(data.kpi.open_cost) }}</div>
+        <div class="kpi-label">Total P&amp;L</div>
+        <div class="kpi-value {{ 'text-green' if data.kpi.total_pnl >= 0 else 'text-red' }}" id="kpi-total-pnl">
+            {{ "+" if data.kpi.total_pnl >= 0 else "" }}${{ "%.2f"|format(data.kpi.total_pnl) }}
+            <span class="kpi-pct" id="kpi-total-pnl-pct">({{ "+" if data.kpi.total_pnl_pct >= 0 else "" }}{{ "%.1f"|format(data.kpi.total_pnl_pct) }}%)</span>
+        </div>
     </div>
     <div class="kpi-card">
-        <div class="kpi-label">Realized P&L</div>
+        <div class="kpi-label">Realized P&amp;L</div>
         <div class="kpi-value {{ 'text-green' if data.kpi.realized_pnl >= 0 else 'text-red' }}" id="kpi-realized">
             {{ "+" if data.kpi.realized_pnl >= 0 else "" }}${{ "%.2f"|format(data.kpi.realized_pnl) }}
         </div>
     </div>
     <div class="kpi-card">
-        <div class="kpi-label">Cash Available</div>
-        <div class="kpi-value" id="kpi-cash">${{ "%.2f"|format(data.kpi.cash) }}</div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-label">Unrealized P&L</div>
+        <div class="kpi-label">Unrealized P&amp;L</div>
         <div class="kpi-value {{ 'text-green' if data.kpi.unrealized_pnl >= 0 else 'text-red' }}" id="kpi-unrealized">
             {{ "+" if data.kpi.unrealized_pnl >= 0 else "" }}${{ "%.2f"|format(data.kpi.unrealized_pnl) }}
         </div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-label">Positions</div>
-        <div class="kpi-value" id="kpi-open">{{ data.kpi.open_count }}</div>
     </div>
     <div class="kpi-card">
         <div class="kpi-label">Win Rate</div>
         <div class="kpi-value" id="kpi-winrate">{{ "%.1f%%"|format(data.kpi.win_rate) if data.kpi.win_rate is not none else "—" }}</div>
     </div>
     <div class="kpi-card">
-        <div class="kpi-label">Drawdown</div>
-        <div class="kpi-value {{ 'text-red' if data.kpi.drawdown < 0 else 'text-muted' }}" id="kpi-drawdown">
-            {{ "%.1f"|format(data.kpi.drawdown) }}%
+        <div class="kpi-label">Max Drawdown</div>
+        <div class="kpi-value {{ 'text-red' if data.kpi.max_drawdown > 0 else 'text-muted' }}" id="kpi-drawdown">
+            {{ "%.1f"|format(data.kpi.max_drawdown) }}%
         </div>
     </div>
 </div>

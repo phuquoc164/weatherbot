@@ -96,7 +96,7 @@ body {
 /* ---- KPI Strip ---- */
 .kpi-strip {
     display: grid;
-    grid-template-columns: repeat(8, 1fr);
+    grid-template-columns: 1.4fr repeat(5, 1fr);
     gap: 1px;
     background: var(--border);
     border-bottom: 1px solid var(--border);
@@ -105,6 +105,17 @@ body {
 .kpi-card {
     background: var(--bg-panel);
     padding: 8px 12px;
+}
+
+.kpi-card--primary {
+    background: var(--bg-hover);
+}
+
+.kpi-pct {
+    font-size: 11px;
+    font-weight: 400;
+    opacity: 0.75;
+    margin-left: 2px;
 }
 
 .kpi-label {

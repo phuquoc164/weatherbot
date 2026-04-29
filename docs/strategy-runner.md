@@ -10,22 +10,16 @@ If we test improvements one after another, comparing 5 variants takes months.
 
 ## The Solution: Parallel Isolation
 
-Instead of testing improvements sequentially, we run **5 copies of the bot simultaneously** — one per strategy variant. Each copy runs in its own isolated directory with its own config, its own `data/` folder, and its own calibration. They never interfere with each other.
+Instead of testing improvements sequentially, we run **3 copies of the bot simultaneously** — one per strategy variant. Each copy runs in its own isolated directory with its own config, its own `data/` folder, and its own calibration. They never interfere with each other.
 
 ```
 runs/
-├── baseline/          ← control group, no improvements
-│   ├── weatherbot.py  ← symlink to the real bot
-│   ├── config.json    ← copied from strategies/baseline.json
-│   ├── data/          ← isolated market files, calibration, state
-│   └── logs/
 ├── prob_model/        ← improvement #1: normal CDF for all buckets
 ├── time_decay/        ← improvement #3: smaller bets on D+2/D+3
-├── dynamic_ev/        ← improvement #6: higher MIN_EV in volatile cities
-└── combined/          ← all three improvements at once
+└── dynamic_ev/        ← improvement #6: higher MIN_EV in volatile cities
 ```
 
-After 4–6 weeks, all 5 variants have traded the **same markets at the same prices**, so the comparison is apples-to-apples. The only difference between variants is the strategy flags in their config.
+After 4–6 weeks, all variants have traded the **same markets at the same prices**, so the comparison is apples-to-apples. The only difference between variants is the strategy flags in their config. The main bot serves as the control group.
 
 ---
 
@@ -33,11 +27,10 @@ After 4–6 weeks, all 5 variants have traded the **same markets at the same pri
 
 | Variant | Flags enabled | What it tests |
 |---|---|---|
-| `baseline` | none | Current behavior — the control group |
+| main bot | none | Control group — binary p=1.0, no modifications |
 | `prob_model` | `prob_model_normal_cdf: true` | Improvement #1: interior buckets use normal CDF instead of binary 0/1 |
 | `time_decay` | `time_decay: true` | Improvement #3: bets scaled by horizon (D+0 full size, D+3 = 40%) |
 | `dynamic_ev` | `dynamic_min_ev: true` | Improvement #6: MIN_EV scaled by city sigma (more selective in volatile markets) |
-| `combined` | all three | All improvements together — expected best performer |
 
 ---
 
@@ -54,7 +47,7 @@ STRAT_DYNAMIC_EV = _strat.get("dynamic_min_ev", False)
 
 **Improvement #1 — `bucket_prob`:**
 ```python
-# baseline: interior bucket returns 1.0 if forecast lands in it, 0.0 otherwise
+# main bot: interior bucket returns 1.0 if forecast lands in it, 0.0 otherwise
 # prob_model: applies normal distribution to interior buckets too
 if STRAT_PROB_MODEL:
     return norm_cdf((t_high - forecast) / s) - norm_cdf((t_low - forecast) / s)
@@ -130,7 +123,7 @@ Each variant starts as a background subprocess with its own log. Variants are st
 
 ```bash
 python strategy_runner.py status        # balance, P&L, trade count for all variants
-python strategy_runner.py logs baseline # last 50 lines of a variant's log
+python strategy_runner.py logs prob_model # last 50 lines of a variant's log
 ```
 
 Compare all variants side-by-side:
@@ -144,13 +137,12 @@ Example output (after 2 weeks):
 ```
 Variant          Description                                Balance      PnL    ROI%  Trades  Wins  WinRate    AvgEV
 ----------------------------------------------------------------------------------------------------------------------
-baseline         No improvements (control)                 1023.40   +23.40   +2.3%      18    11    61.1%   0.3421
+main             Control group (binary p=1.0)              1023.40   +23.40   +2.3%      18    11    61.1%   0.3421
 prob_model       Normal CDF for interior buckets (#1)      1041.20   +41.20   +4.1%      22    14    63.6%   0.2987
 time_decay       Horizon multiplier on bet size (#3)       1031.80   +31.80   +3.2%      18    12    66.7%   0.3421
 dynamic_ev       Dynamic MIN_EV by sigma (#6)              1028.60   +28.60   +2.9%      14    10    71.4%   0.3812
-combined         All three improvements combined           1057.40   +57.40   +5.7%      20    14    70.0%   0.3105
 
-Best P&L so far: combined (+57.40)
+Best P&L so far: prob_model (+41.20)
 Most trades:     prob_model (22 trades)
 ```
 
@@ -159,8 +151,8 @@ Most trades:     prob_model (22 trades)
 ### Step 5 — Stop
 
 ```bash
-python strategy_runner.py stop          # stop all 5
-python strategy_runner.py stop baseline # or just one
+python strategy_runner.py stop           # stop all variants
+python strategy_runner.py stop prob_model # or just one
 ```
 
 ---

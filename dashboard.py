@@ -39,7 +39,7 @@ MARKETS_DIR      = DATA_DIR / "markets"
 CALIBRATION_FILE = DATA_DIR / "calibration.json"
 RUNS_DIR         = BASE_DIR / "runs"
 
-STRATEGY_VARIANTS = ["baseline", "prob_model", "time_decay", "dynamic_ev"]
+STRATEGY_VARIANTS = ["prob_model", "time_decay", "dynamic_ev"]
 
 # =============================================================================
 # LOCATIONS  (mirrored from weatherbot.py)

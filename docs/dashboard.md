@@ -229,9 +229,9 @@ Returns the list of configured strategy variants and their running state.
 {
   "main_running": true,
   "variants": [
-    { "name": "baseline",   "label": "baseline",   "running": true  },
-    { "name": "prob_model", "label": "prob_model",  "running": false },
-    { "name": "time_decay", "label": "time_decay",  "running": false }
+    { "name": "prob_model", "label": "prob_model", "running": true  },
+    { "name": "time_decay", "label": "time_decay", "running": false },
+    { "name": "dynamic_ev", "label": "dynamic_ev", "running": false }
   ]
 }
 ```
@@ -240,7 +240,7 @@ A variant appears in the list only if `runs/<name>/config.json` exists. `main_ru
 
 ### `GET /api/source/{name}/dashboard`
 
-Returns the full dashboard payload for a single strategy variant, reading from `runs/<name>/data/` instead of `data/`. The name must be one of the configured `STRATEGY_VARIANTS` (`baseline`, `prob_model`, `time_decay`, `dynamic_ev`, `combined`); any other value returns HTTP 404.
+Returns the full dashboard payload for a single strategy variant, reading from `runs/<name>/data/` instead of `data/`. The name must be one of the configured `STRATEGY_VARIANTS` (`prob_model`, `time_decay`, `dynamic_ev`); any other value returns HTTP 404.
 
 `balance_history` and `activity` are always `[]` for variant payloads — only the main thread maintains those in-memory structures.
 

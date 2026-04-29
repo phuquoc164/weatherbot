@@ -30,7 +30,7 @@ ROOT       = Path(__file__).parent.parent
 RUNS_DIR   = ROOT / "runs"
 STRATS_DIR = ROOT / "strategies" / "configs"
 
-VARIANTS = ["baseline", "prob_model", "time_decay", "dynamic_ev"]
+VARIANTS = ["prob_model", "time_decay", "dynamic_ev"]
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ def cmd_start(target: str | None = None, stagger: int = 120):
 
         pid_file(name).write_text(str(proc.pid))
         flags = _active_flags(name)
-        print(f"[start] {name:15s} pid={proc.pid}  flags: {flags or 'none (baseline)'}")
+        print(f"[start] {name:15s} pid={proc.pid}  flags: {flags or 'none'}")
 
         if idx < len(names) - 1:
             print(f"         (waiting {stagger}s before next variant to avoid API rate limits…)")

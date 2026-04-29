@@ -204,7 +204,7 @@ class TestRunCalibration(unittest.TestCase):
     def _market(self, city, actual_temp, forecast_temp, source="ecmwf", resolved=True):
         return {
             "city": city,
-            "resolved": resolved,
+            "status": "resolved" if resolved else "open",
             "actual_temp": actual_temp,
             "forecast_snapshots": [
                 {"source": source, "temp": forecast_temp, "ts": "2026-04-25T00:00:00"}

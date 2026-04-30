@@ -423,5 +423,68 @@ class TestBuildDashboardDataVariant(unittest.TestCase):
         self.assertAlmostEqual(history[0]["balance"], 1050.0, places=2)
 
 
+class TestTradeHistoryFilters(unittest.TestCase):
+    """Verify that closed_positions carries the fields the JS filters rely on,
+    and that filtering/sorting produces the correct subsets."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        markets = self.tmp / "markets"
+        markets.mkdir(parents=True)
+        (self.tmp / "state.json").write_text(
+            json.dumps({"starting_balance": 1000.0}), encoding="utf-8"
+        )
+        trades = [
+            ("nyc",     "New York City", "stop_loss",   -5.0,  "2026-04-01T10:00:00"),
+            ("miami",   "Miami",         "take_profit",  15.0, "2026-04-02T10:00:00"),
+            ("chicago", "Chicago",       "stop_loss",   -3.0,  "2026-04-03T10:00:00"),
+            ("dallas",  "Dallas",        "take_profit",  8.0,  "2026-04-04T10:00:00"),
+        ]
+        for city, city_name, reason, pnl, closed_at in trades:
+            (markets / f"{city}.json").write_text(json.dumps({
+                "city": city, "city_name": city_name, "date": closed_at[:10],
+                "position": {
+                    "status": "closed", "pnl": pnl,
+                    "close_reason": reason, "closed_at": closed_at,
+                    "entry_price": 0.5, "exit_price": 0.6,
+                },
+            }), encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _closed(self):
+        with patch.object(dashboard, "check_bot_status", return_value=_MOCK_BOT_STATUS):
+            return build_dashboard_data(data_dir=self.tmp)["closed_positions"]
+
+    def test_all_positions_have_filter_fields(self):
+        for pos in self._closed():
+            self.assertIn("city_name",    pos)
+            self.assertIn("close_reason", pos)
+            self.assertIn("closed_at",    pos)
+
+    def test_filter_by_city_returns_only_that_city(self):
+        filtered = [p for p in self._closed() if p["city_name"] == "Miami"]
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["close_reason"], "take_profit")
+
+    def test_filter_by_reason_returns_only_matching_trades(self):
+        filtered = [p for p in self._closed() if p["close_reason"] == "stop_loss"]
+        self.assertEqual(len(filtered), 2)
+        self.assertTrue(all(p["close_reason"] == "stop_loss" for p in filtered))
+
+    def test_filter_city_and_reason_combined(self):
+        closed = self._closed()
+        filtered = [p for p in closed
+                    if p["city_name"] == "New York City" and p["close_reason"] == "stop_loss"]
+        self.assertEqual(len(filtered), 1)
+        self.assertAlmostEqual(filtered[0]["pnl"], -5.0)
+
+    def test_filter_returns_empty_for_unknown_city(self):
+        filtered = [p for p in self._closed() if p["city_name"] == "Los Angeles"]
+        self.assertEqual(filtered, [])
+
+
+
 if __name__ == "__main__":
     unittest.main()

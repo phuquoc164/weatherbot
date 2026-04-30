@@ -315,12 +315,30 @@
     }
 
     // =========================================================================
-    // Update Trade History
+    // Trade History — filters + sort
     // =========================================================================
-    function updateHistory(trades) {
-        const body = document.getElementById("history-body");
-        const count = document.getElementById("history-count");
-        count.textContent = trades.length + " closed";
+    let allHistory = [];
+
+    function renderHistory() {
+        const cityVal   = document.getElementById("history-filter-city").value;
+        const reasonVal = document.getElementById("history-filter-reason").value;
+
+        let trades = allHistory.slice();
+        if (cityVal)   trades = trades.filter(t => t.city_name    === cityVal);
+        if (reasonVal) trades = trades.filter(t => t.close_reason === reasonVal);
+
+        const body      = document.getElementById("history-body");
+        const count     = document.getElementById("history-count");
+        const total     = allHistory.length;
+        const filtered  = trades.length;
+        const pnl       = trades.reduce((s, t) => s + (t.pnl ?? 0), 0);
+        const pnlStr    = `<span class="${pnl >= 0 ? "text-green" : "text-red"}">${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}</span>`;
+        if ((cityVal || reasonVal) && filtered < total) {
+            const pct = total > 0 ? (filtered / total * 100).toFixed(1) : "0.0";
+            count.innerHTML = `${filtered}/${total} closed (${pct}%) · ${pnlStr}`;
+        } else {
+            count.innerHTML = `${total} closed · ${pnlStr}`;
+        }
 
         if (trades.length === 0) {
             body.innerHTML = '<tr><td colspan="5" class="empty-cell">No closed trades yet</td></tr>';
@@ -329,7 +347,7 @@
 
         let html = "";
         for (const t of trades) {
-            const pnl = t.pnl ?? 0;
+            const pnl      = t.pnl ?? 0;
             const pnlClass = pnl >= 0 ? "text-green" : "text-red";
             const pnlSign = pnl >= 0 ? "+" : "";
             const reason = t.close_reason || "unknown";
@@ -346,6 +364,27 @@
         }
         body.innerHTML = html;
     }
+
+    function updateHistory(trades) {
+        allHistory = trades || [];
+
+        const cityEl   = document.getElementById("history-filter-city");
+        const prevCity = cityEl.value;
+        const cities   = [...new Set(allHistory.map(t => t.city_name))].sort();
+        cityEl.innerHTML = '<option value="">All cities</option>' +
+            cities.map(c => `<option value="${c}"${c === prevCity ? " selected" : ""}>${c}</option>`).join("");
+
+        const reasonEl   = document.getElementById("history-filter-reason");
+        const prevReason = reasonEl.value;
+        const reasons    = [...new Set(allHistory.map(t => t.close_reason).filter(Boolean))].sort();
+        reasonEl.innerHTML = '<option value="">All reasons</option>' +
+            reasons.map(r => `<option value="${r}"${r === prevReason ? " selected" : ""}>${r}</option>`).join("");
+
+        renderHistory();
+    }
+
+    document.getElementById("history-filter-city").addEventListener("change", renderHistory);
+    document.getElementById("history-filter-reason").addEventListener("change", renderHistory);
 
     // =========================================================================
     // Update Activity Feed

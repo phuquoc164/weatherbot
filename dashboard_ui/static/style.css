@@ -340,6 +340,33 @@ body {
     position: relative;
 }
 
+/* ---- Trade History Filters ---- */
+.history-filters {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 5px;
+    flex-shrink: 0;
+}
+
+.history-filters select {
+    background: var(--bg-panel);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    padding: 2px 4px;
+    outline: none;
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+}
+
+.history-filters select:focus {
+    border-color: var(--accent-blue);
+}
+
+
 .reason-badge {
     font-size: 8px;
     padding: 1px 4px;

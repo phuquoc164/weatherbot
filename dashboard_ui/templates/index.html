@@ -92,6 +92,14 @@
             <span>Trade History</span>
             <span class="count" id="history-count">{{ data.closed_positions|length }} closed</span>
         </div>
+        <div class="history-filters">
+            <select id="history-filter-city" aria-label="Filter by city">
+                <option value="">All cities</option>
+            </select>
+            <select id="history-filter-reason" aria-label="Filter by reason">
+                <option value="">All reasons</option>
+            </select>
+        </div>
         <div class="table-wrap">
             <table class="data-table">
                 <thead>

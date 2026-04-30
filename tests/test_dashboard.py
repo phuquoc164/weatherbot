@@ -380,27 +380,47 @@ class TestBuildDashboardDataVariant(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self._history_snapshot = len(dashboard.balance_history)
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
-        del dashboard.balance_history[self._history_snapshot:]
 
-    def test_is_variant_does_not_mutate_balance_history(self):
-        before = len(dashboard.balance_history)
-        build_dashboard_data(data_dir=self.tmp, is_variant=True)
-        self.assertEqual(len(dashboard.balance_history), before)
+    def test_variant_balance_history_empty_without_trades(self):
+        result = build_dashboard_data(data_dir=self.tmp, is_variant=True)
+        self.assertEqual(result["balance_history"], [])
 
-    def test_is_variant_false_appends_to_balance_history(self):
-        # Write a state.json with a balance that won't match any existing tail
-        state_file = self.tmp / "state.json"
-        state_file.write_text(
-            json.dumps({"balance": 88888.88, "starting_balance": 1000.0}), encoding="utf-8"
+    def test_main_bot_balance_history_always_has_live_point(self):
+        # No trades — history should still have one point (the live balance)
+        (self.tmp / "state.json").write_text(
+            json.dumps({"balance": 1000.0, "starting_balance": 1000.0}), encoding="utf-8"
         )
-        before = len(dashboard.balance_history)
         with patch.object(dashboard, "check_bot_status", return_value=_MOCK_BOT_STATUS):
-            build_dashboard_data(data_dir=self.tmp, is_variant=False)
-        self.assertGreater(len(dashboard.balance_history), before)
+            result = build_dashboard_data(data_dir=self.tmp, is_variant=False)
+        history = result["balance_history"]
+        self.assertGreater(len(history), 0)
+        self.assertIn("ts", history[-1])
+        self.assertIn("balance", history[-1])
+
+    def test_main_bot_balance_history_uses_real_timestamps(self):
+        # Closed trade with a past timestamp should appear in history, not just 'now'
+        (self.tmp / "state.json").write_text(
+            json.dumps({"balance": 1050.0, "starting_balance": 1000.0}), encoding="utf-8"
+        )
+        markets = self.tmp / "markets"
+        markets.mkdir(parents=True)
+        (markets / "nyc.json").write_text(
+            json.dumps({
+                "city": "nyc", "city_name": "New York City", "date": "2026-04-01",
+                "position": {"status": "closed", "pnl": 50.0,
+                             "closed_at": "2026-04-01T10:00:00"},
+            }),
+            encoding="utf-8",
+        )
+        with patch.object(dashboard, "check_bot_status", return_value=_MOCK_BOT_STATUS):
+            result = build_dashboard_data(data_dir=self.tmp, is_variant=False)
+        history = result["balance_history"]
+        self.assertGreaterEqual(len(history), 1)
+        self.assertIn("2026-04-01", history[0]["ts"])
+        self.assertAlmostEqual(history[0]["balance"], 1050.0, places=2)
 
 
 if __name__ == "__main__":

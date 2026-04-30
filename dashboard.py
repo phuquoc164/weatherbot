@@ -72,7 +72,6 @@ LOCATIONS = {
 # IN-MEMORY STATE
 # =============================================================================
 
-balance_history: list = []          # [{ts, balance}, ...]
 activity_feed: deque = deque(maxlen=100)   # recent events
 previous_markets: dict = {}         # last snapshot keyed by stem
 connected_clients: set = set()      # active WebSocket connections
@@ -354,11 +353,13 @@ def build_dashboard_data(
     kpi      = _compute_equity_kpis(starting, open_positions, closed_positions, markets)
     equity   = kpi.pop("equity")  # internal use only — not exposed in the KPI strip
 
-    # Track balance history (main thread only — variants must not pollute shared state)
-    now_str = datetime.now(timezone.utc).isoformat()
+    # Reconstruct balance history from closed positions so period filters work correctly.
+    # For the main bot, append a live point so the chart always ends at the current state.
+    bh = _build_variant_balance_history(closed_positions, starting)
     if not is_variant:
-        if not balance_history or balance_history[-1]["balance"] != equity:
-            balance_history.append({"ts": now_str, "balance": equity})
+        now_str = datetime.now(timezone.utc).isoformat()
+        if not bh or bh[-1]["balance"] != round(equity, 2):
+            bh.append({"ts": now_str, "balance": round(equity, 2)})
 
     return {
         "state":           state,
@@ -368,7 +369,7 @@ def build_dashboard_data(
         "forecasts":       forecasts,
         "calibration":     calibration,
         "bot_status":      bot_status,
-        "balance_history": balance_history if not is_variant else _build_variant_balance_history(closed_positions, starting),
+        "balance_history": bh,
         "activity":        list(activity_feed) if not is_variant else [],
         "locations":       LOCATIONS,
     }

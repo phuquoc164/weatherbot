@@ -141,20 +141,55 @@
         },
     });
 
-    function updateChart(history) {
-        if (!history || history.length === 0) {
+    let allBalanceHistory = [];
+    let activePeriod = "1W";
+
+    const PERIOD_MS = { "1D": 86400000, "1W": 604800000, "1M": 2592000000 };
+
+    function filterHistory(history, period) {
+        if (period === "ALL" || !PERIOD_MS[period]) return history;
+        const cutoff = Date.now() - PERIOD_MS[period];
+        return history.filter(h => new Date(h.ts).getTime() >= cutoff);
+    }
+
+    function labelForPeriod(ts, period) {
+        const d = new Date(ts);
+        if (period === "1D") {
+            return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }
+        if (period === "1W") {
+            return d.toLocaleDateString([], { month: "numeric", day: "numeric" })
+                + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }
+        return d.toLocaleDateString([], { month: "numeric", day: "numeric" });
+    }
+
+    function renderChart(period) {
+        const slice = filterHistory(allBalanceHistory, period);
+        if (!slice || slice.length === 0) {
             balanceChart.data.labels = [];
             balanceChart.data.datasets[0].data = [];
             balanceChart.update("none");
             return;
         }
-        balanceChart.data.labels = history.map(h => {
-            const d = new Date(h.ts);
-            return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        });
-        balanceChart.data.datasets[0].data = history.map(h => h.balance);
+        balanceChart.data.labels = slice.map(h => labelForPeriod(h.ts, period));
+        balanceChart.data.datasets[0].data = slice.map(h => h.balance);
         balanceChart.update("none");
     }
+
+    function updateChart(history) {
+        allBalanceHistory = history || [];
+        renderChart(activePeriod);
+    }
+
+    document.querySelectorAll(".period-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll(".period-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            activePeriod = btn.dataset.period;
+            renderChart(activePeriod);
+        });
+    });
 
     // =========================================================================
     // Update KPIs
@@ -166,6 +201,7 @@
 
         function setPnl(id, value) {
             const el = document.getElementById(id);
+            if (!el) return;
             el.textContent = (value >= 0 ? "+" : "") + "$" + value.toFixed(2);
             el.className = "kpi-value " + (value >= 0 ? "text-green" : "text-red");
         }

@@ -264,30 +264,6 @@
     }
 
     // =========================================================================
-    // Update Forecasts Table
-    // =========================================================================
-    function updateForecasts(forecasts) {
-        const body = document.getElementById("forecast-body");
-
-        if (!forecasts || forecasts.length === 0) {
-            body.innerHTML = '<tr><td colspan="5" class="empty-cell">Waiting for first scan...</td></tr>';
-            return;
-        }
-
-        let html = "";
-        for (const f of forecasts) {
-            html += `<tr>` +
-                `<td class="col-code">${f.city.toUpperCase().slice(0, 3)}</td>` +
-                `<td class="col-mono">${f.ecmwf !== null && f.ecmwf !== undefined ? f.ecmwf + "°" : "—"}</td>` +
-                `<td class="col-mono">${f.hrrr !== null && f.hrrr !== undefined ? f.hrrr + "°" : "—"}</td>` +
-                `<td class="col-mono">${f.metar !== null && f.metar !== undefined ? f.metar + "°" : "—"}</td>` +
-                `<td class="col-mono text-green">${f.best}°${f.unit}</td>` +
-                `</tr>`;
-        }
-        body.innerHTML = html;
-    }
-
-    // =========================================================================
     // Update Calibration
     // =========================================================================
     function updateCalibration(calibration) {
@@ -315,9 +291,28 @@
     }
 
     // =========================================================================
-    // Trade History — filters + sort
+    // Trade History — filters
     // =========================================================================
     let allHistory = [];
+    let historySortDir = null; // null = closed_at desc (backend order), "desc" = P&L high→low, "asc" = P&L low→high
+
+    function fmtTs(ts) {
+        if (!ts) return "—";
+        return ts.slice(0, 16).replace("T", " ");
+    }
+
+    function fmtDuration(openedAt, closedAt) {
+        if (!openedAt || !closedAt) return "—";
+        const ms = new Date(closedAt) - new Date(openedAt);
+        if (ms <= 0) return "—";
+        const totalMins = Math.floor(ms / 60000);
+        const days  = Math.floor(totalMins / 1440);
+        const hours = Math.floor((totalMins % 1440) / 60);
+        const mins  = totalMins % 60;
+        if (days > 0)  return `${days}d ${hours}h`;
+        if (hours > 0) return `${hours}h ${mins}m`;
+        return `${mins}m`;
+    }
 
     function renderHistory() {
         const cityVal   = document.getElementById("history-filter-city").value;
@@ -326,6 +321,20 @@
         let trades = allHistory.slice();
         if (cityVal)   trades = trades.filter(t => t.city_name    === cityVal);
         if (reasonVal) trades = trades.filter(t => t.close_reason === reasonVal);
+
+        if (historySortDir !== null) {
+            trades.sort((a, b) => {
+                const cmp = (a.pnl ?? 0) - (b.pnl ?? 0);
+                return historySortDir === "desc" ? -cmp : cmp;
+            });
+        }
+
+        const histSortTh = document.querySelector(".history-sort-col");
+        if (histSortTh) {
+            histSortTh.textContent = historySortDir === "desc" ? "P&L ▼"
+                                   : historySortDir === "asc"  ? "P&L ▲"
+                                   : "P&L";
+        }
 
         const body      = document.getElementById("history-body");
         const count     = document.getElementById("history-count");
@@ -341,7 +350,7 @@
         }
 
         if (trades.length === 0) {
-            body.innerHTML = '<tr><td colspan="5" class="empty-cell">No closed trades yet</td></tr>';
+            body.innerHTML = '<tr><td colspan="8" class="empty-cell">No closed trades yet</td></tr>';
             return;
         }
 
@@ -349,15 +358,17 @@
         for (const t of trades) {
             const pnl      = t.pnl ?? 0;
             const pnlClass = pnl >= 0 ? "text-green" : "text-red";
-            const pnlSign = pnl >= 0 ? "+" : "";
-            const reason = t.close_reason || "unknown";
-
-            const entryP = t.entry_price != null ? "$" + t.entry_price.toFixed(3) : "—";
-            const exitP  = t.exit_price  != null ? "$" + t.exit_price.toFixed(3)  : "—";
+            const pnlSign  = pnl >= 0 ? "+" : "";
+            const reason    = t.close_reason || "unknown";
+            const entryText = t.entry_price != null ? "$" + t.entry_price.toFixed(3) : "—";
+            const exitText  = t.exit_price  != null ? "$" + t.exit_price.toFixed(3)  : "—";
             html += `<tr>` +
                 `<td>${t.city_name}</td>` +
-                `<td class="col-mono">${t.date}</td>` +
-                `<td class="col-mono">${entryP} → ${exitP}</td>` +
+                `<td class="col-mono">${t.date || "—"}</td>` +
+                `<td class="col-mono">${fmtTs(t.opened_at)}</td>` +
+                `<td class="col-mono">${fmtTs(t.closed_at)}</td>` +
+                `<td class="col-mono">${fmtDuration(t.opened_at, t.closed_at)}</td>` +
+                `<td class="col-mono">${entryText} → ${exitText}</td>` +
                 `<td><span class="reason-badge reason-${reason}">${reason}</span></td>` +
                 `<td class="${pnlClass}">${pnlSign}$${pnl.toFixed(2)}</td>` +
                 `</tr>`;
@@ -385,6 +396,10 @@
 
     document.getElementById("history-filter-city").addEventListener("change", renderHistory);
     document.getElementById("history-filter-reason").addEventListener("change", renderHistory);
+    document.querySelector(".history-sort-col").addEventListener("click", () => {
+        historySortDir = historySortDir === null ? "desc" : historySortDir === "desc" ? "asc" : null;
+        renderHistory();
+    });
 
     // =========================================================================
     // Update Activity Feed
@@ -428,7 +443,6 @@
             updateChart(data.balance_history);
             updatePositions(data.open_positions || []);
             updateHistory(data.closed_positions || []);
-            updateForecasts(data.forecasts || []);
             updateCalibration(data.calibration);
             updateActivity(data.activity || []);
         } catch (e) {

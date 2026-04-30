@@ -157,7 +157,7 @@ body {
 .panel {
     background: var(--bg-main);
     padding: 10px;
-    overflow: visible;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
 }
@@ -229,6 +229,15 @@ body {
     overflow-x: auto;
     flex: 1;
     min-height: 0;
+}
+
+.history-sort-col {
+    cursor: pointer;
+    user-select: none;
+}
+
+.history-sort-col:hover {
+    color: var(--text-primary);
 }
 
 .data-table {
@@ -414,8 +423,11 @@ body {
 
 /* ---- Calibration Bars ---- */
 .calibration-section {
-    margin-top: 10px;
-    flex-shrink: 0;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
 }
 
 .calibration-entry {

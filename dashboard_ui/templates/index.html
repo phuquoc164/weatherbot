@@ -104,12 +104,12 @@
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>City</th><th>Date</th><th>Entry → Exit</th><th>Reason</th><th>P&amp;L</th>
+                        <th>City</th><th>Market</th><th>Opened</th><th>Closed</th><th>Dur.</th><th>Entry→Exit</th><th>Reason</th><th>P&amp;L</th>
                     </tr>
                 </thead>
                 <tbody id="history-body">
                     {% if not data.closed_positions %}
-                    <tr><td colspan="5" class="empty-cell">No closed trades yet</td></tr>
+                    <tr><td colspan="8" class="empty-cell">No closed trades yet</td></tr>
                     {% endif %}
                 </tbody>
             </table>
@@ -132,25 +132,8 @@
         </div>
     </div>
 
-    <!-- RIGHT: Forecasts + Calibration (spans 2 rows) -->
+    <!-- RIGHT: Calibration (spans 2 rows) -->
     <div class="panel panel-right">
-        <div class="panel-header">
-            <span>Forecast Sources</span>
-        </div>
-        <div class="table-wrap">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>City</th><th>ECMWF</th><th>HRRR</th><th>METAR</th><th>Best</th>
-                    </tr>
-                </thead>
-                <tbody id="forecast-body">
-                    {% if not data.forecasts %}
-                    <tr><td colspan="5" class="empty-cell">Waiting for first scan...</td></tr>
-                    {% endif %}
-                </tbody>
-            </table>
-        </div>
 
         <div class="calibration-section">
             <div class="panel-header">
@@ -217,6 +200,37 @@
             {% endif %}
         </div>
 
+<<<<<<< Updated upstream
+=======
+    <!-- CENTER BOTTOM: Trade History -->
+    <div class="panel">
+        <div class="panel-header">
+            <span>Trade History</span>
+            <span class="count" id="history-count">{{ data.closed_positions|length }} closed</span>
+        </div>
+        <div class="history-filters">
+            <select id="history-filter-city" aria-label="Filter by city">
+                <option value="">All cities</option>
+            </select>
+            <select id="history-filter-reason" aria-label="Filter by reason">
+                <option value="">All reasons</option>
+            </select>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>City</th><th>Market</th><th>Opened</th><th>Closed</th><th>Dur.</th><th>Entry→Exit</th><th>Reason</th><th class="history-sort-col">P&amp;L</th>
+                    </tr>
+                </thead>
+                <tbody id="history-body">
+                    {% if not data.closed_positions %}
+                    <tr><td colspan="8" class="empty-cell">No closed trades yet</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+>>>>>>> Stashed changes
     </div>
 
 </div>

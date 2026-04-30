@@ -435,17 +435,17 @@ class TestTradeHistoryFilters(unittest.TestCase):
             json.dumps({"starting_balance": 1000.0}), encoding="utf-8"
         )
         trades = [
-            ("nyc",     "New York City", "stop_loss",   -5.0,  "2026-04-01T10:00:00"),
-            ("miami",   "Miami",         "take_profit",  15.0, "2026-04-02T10:00:00"),
-            ("chicago", "Chicago",       "stop_loss",   -3.0,  "2026-04-03T10:00:00"),
-            ("dallas",  "Dallas",        "take_profit",  8.0,  "2026-04-04T10:00:00"),
+            ("nyc",     "New York City", "stop_loss",   -5.0,  "2026-04-01T08:00:00", "2026-04-01T10:00:00"),
+            ("miami",   "Miami",         "take_profit",  15.0, "2026-04-02T06:00:00", "2026-04-02T10:00:00"),
+            ("chicago", "Chicago",       "stop_loss",   -3.0,  "2026-04-03T09:00:00", "2026-04-03T10:00:00"),
+            ("dallas",  "Dallas",        "take_profit",  8.0,  "2026-04-04T07:00:00", "2026-04-04T10:00:00"),
         ]
-        for city, city_name, reason, pnl, closed_at in trades:
+        for city, city_name, reason, pnl, opened_at, closed_at in trades:
             (markets / f"{city}.json").write_text(json.dumps({
                 "city": city, "city_name": city_name, "date": closed_at[:10],
                 "position": {
                     "status": "closed", "pnl": pnl,
-                    "close_reason": reason, "closed_at": closed_at,
+                    "close_reason": reason, "opened_at": opened_at, "closed_at": closed_at,
                     "entry_price": 0.5, "exit_price": 0.6,
                 },
             }), encoding="utf-8")
@@ -461,6 +461,7 @@ class TestTradeHistoryFilters(unittest.TestCase):
         for pos in self._closed():
             self.assertIn("city_name",    pos)
             self.assertIn("close_reason", pos)
+            self.assertIn("opened_at",    pos)
             self.assertIn("closed_at",    pos)
 
     def test_filter_by_city_returns_only_that_city(self):

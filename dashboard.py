@@ -248,6 +248,7 @@ def _project_closed_position(market: dict, position: dict) -> dict:
         "pnl":          position.get("pnl", 0),
         "cost":         position.get("cost"),
         "close_reason": position.get("close_reason", "unknown"),
+        "opened_at":    position.get("opened_at"),
         "closed_at":    position.get("closed_at"),
     }
 

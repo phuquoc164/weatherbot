@@ -12,78 +12,101 @@
     let currentSource = "main";
 
     // =========================================================================
-    // City Position Table
+    // City Stats Table
     // =========================================================================
-    function updateCityTable(data) {
-        const forecasts   = data.forecasts        || [];
-        const openPos     = data.open_positions   || [];
-        const closedPos   = data.closed_positions || [];
-        const locations   = data.locations        || {};
-        const calibration = data.calibration      || {};
+    let citySort    = { col: "pnl", dir: "desc" };
+    let lastCityData = null;
 
-        // closed_positions arrive sorted descending by closed_at — first hit per city is newest
-        const lastClosed = {};
+    const SORT_LABELS = { trades: "Trades", winpct: "Win%", pnl: "P&L" };
+
+    function renderCityTable() {
+        if (!lastCityData) return;
+        const { closedPos, locations } = lastCityData;
+
+        // Aggregate per city — wins = any trade with P&L > 0
+        const stats = {};
         for (const p of closedPos) {
-            if (!lastClosed[p.city]) lastClosed[p.city] = p;
+            if (!stats[p.city]) stats[p.city] = { trades: 0, sl: 0, tp: 0, ts: 0, fc: 0, wins: 0, pnl: 0 };
+            const s = stats[p.city];
+            s.trades++;
+            s.pnl += p.pnl ?? 0;
+            if (p.close_reason === "stop_loss")                                    s.sl++;
+            else if (p.close_reason === "take_profit" || p.close_reason === "resolved") s.tp++;
+            else if (p.close_reason === "trailing_stop")                           s.ts++;
+            else if (p.close_reason === "forecast_changed")                        s.fc++;
+            if ((p.pnl ?? 0) > 0) s.wins++;
         }
 
-        // minimum sigma across any source with n≥10 for a given city
-        function citySigma(cityKey) {
-            const prefix = cityKey + "_";
-            let min = null;
-            for (const [k, v] of Object.entries(calibration)) {
-                if (k.startsWith(prefix) && v.n >= 10) {
-                    if (min === null || v.sigma < min) min = v.sigma;
-                }
-            }
-            return min;
-        }
+        // Sort entries — cities with no trades always last
+        const entries = Object.entries(locations).map(([key, loc]) => {
+            const s      = stats[key] || { trades: 0, sl: 0, tp: 0, wins: 0, pnl: 0 };
+            const winPct = s.trades > 0 ? (s.wins / s.trades) * 100 : null;
+            return { key, loc, s, winPct };
+        });
+        entries.sort((a, b) => {
+            if (a.s.trades === 0 && b.s.trades === 0) return 0;
+            if (a.s.trades === 0) return 1;
+            if (b.s.trades === 0) return -1;
+            let cmp = 0;
+            if (citySort.col === "trades") cmp = a.s.trades - b.s.trades;
+            else if (citySort.col === "winpct") cmp = (a.winPct ?? 0) - (b.winPct ?? 0);
+            else cmp = a.s.pnl - b.s.pnl;
+            return citySort.dir === "desc" ? -cmp : cmp;
+        });
+
+        // Update sort indicators in header
+        document.querySelectorAll(".city-sort-col").forEach(th => {
+            const col   = th.dataset.sort;
+            const arrow = citySort.col === col ? (citySort.dir === "desc" ? " ▼" : " ▲") : "";
+            th.textContent = SORT_LABELS[col] + arrow;
+        });
 
         let html = "";
-        for (const [key, loc] of Object.entries(locations)) {
-            const forecast = forecasts.find(f => f.city === key);
-            const open     = openPos.find(p => p.city === key);
-            const closed   = lastClosed[key];
-            const sigma    = citySigma(key);
-
-            const temp     = (forecast && forecast.best != null) ? `${forecast.best}°${forecast.unit}` : "—";
-            const sigmaStr = sigma !== null ? sigma.toFixed(1) : "—";
-
-            let statusHtml, bucketHtml, pnlHtml;
-            if (open) {
-                const pnlCls = (open.pnl ?? 0) >= 0 ? "text-green" : "text-red";
-                const sign   = (open.pnl ?? 0) >= 0 ? "+" : "";
-                statusHtml = `<span class="city-status-open">OPEN</span>`;
-                bucketHtml = `${open.bucket_low}–${open.bucket_high}°${open.unit || ""}`;
-                pnlHtml    = `<span class="${pnlCls}">${sign}$${(open.pnl ?? 0).toFixed(2)}</span>`;
-            } else if (closed) {
-                const pnlCls = (closed.pnl ?? 0) >= 0 ? "text-green" : "text-red";
-                const sign   = (closed.pnl ?? 0) >= 0 ? "+" : "";
-                statusHtml = `<span class="city-status-closed">CLOSED</span>`;
-                bucketHtml = closed.bucket_low != null
-                    ? `${closed.bucket_low}–${closed.bucket_high}°${closed.unit || ""}`
-                    : "—";
-                pnlHtml    = `<span class="${pnlCls}">${sign}$${(closed.pnl ?? 0).toFixed(2)}</span>`;
-            } else {
-                statusHtml = `<span class="text-muted">—</span>`;
-                bucketHtml = "—";
-                pnlHtml    = "—";
-            }
+        for (const { key, loc, s, winPct } of entries) {
+            const pnlCls  = s.pnl >= 0 ? "text-green" : "text-red";
+            const pnlSign = s.pnl >= 0 ? "+" : "";
+            const winStr  = winPct !== null ? winPct.toFixed(0) + "%" : "—";
+            const pnlStr  = s.trades > 0
+                ? `<span class="${pnlCls}">${pnlSign}$${s.pnl.toFixed(2)}</span>`
+                : `<span class="text-muted">—</span>`;
 
             html += `<tr>` +
                 `<td class="col-code">${key.toUpperCase().slice(0, 3)}</td>` +
                 `<td><div class="city-name">${loc.name}</div></td>` +
-                `<td class="col-mono text-blue">${temp}</td>` +
-                `<td>${statusHtml}</td>` +
-                `<td class="col-mono">${bucketHtml}</td>` +
-                `<td>${pnlHtml}</td>` +
-                `<td class="col-mono text-muted">${sigmaStr}</td>` +
+                `<td class="col-num">${s.trades || "—"}</td>` +
+                `<td class="col-num text-red">${s.sl || "—"}</td>` +
+                `<td class="col-num text-green">${s.tp || "—"}</td>` +
+                `<td class="col-num text-yellow">${s.ts || "—"}</td>` +
+                `<td class="col-num text-blue">${s.fc || "—"}</td>` +
+                `<td class="col-num">${winStr}</td>` +
+                `<td class="col-num">${pnlStr}</td>` +
                 `</tr>`;
         }
 
-        const body = document.getElementById("city-table-body");
-        body.innerHTML = html || `<tr><td colspan="7" class="empty-cell">No city data</td></tr>`;
+        document.getElementById("city-table-body").innerHTML =
+            html || `<tr><td colspan="9" class="empty-cell">No city data</td></tr>`;
     }
+
+    function updateCityTable(data) {
+        lastCityData = {
+            closedPos: data.closed_positions || [],
+            locations: data.locations        || {},
+        };
+        renderCityTable();
+    }
+
+    document.querySelectorAll(".city-sort-col").forEach(th => {
+        th.addEventListener("click", () => {
+            const col = th.dataset.sort;
+            if (citySort.col === col) {
+                citySort.dir = citySort.dir === "desc" ? "asc" : "desc";
+            } else {
+                citySort.col = col;
+                citySort.dir = "desc";
+            }
+            renderCityTable();
+        });
+    });
 
     // =========================================================================
     // Chart.js — Balance History

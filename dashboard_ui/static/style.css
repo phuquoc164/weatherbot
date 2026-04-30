@@ -231,11 +231,13 @@ body {
     min-height: 0;
 }
 
+.city-sort-col,
 .history-sort-col {
     cursor: pointer;
     user-select: none;
 }
 
+.city-sort-col:hover,
 .history-sort-col:hover {
     color: var(--text-primary);
 }
@@ -317,26 +319,6 @@ body {
 #positions-body tr {
     cursor: pointer;
     transition: background 0.15s;
-}
-
-.city-status-open {
-    font-size: 7px;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-    color: var(--accent-green);
-    background: rgba(63, 185, 80, 0.12);
-    padding: 1px 4px;
-    border-radius: 2px;
-}
-
-.city-status-closed {
-    font-size: 7px;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-    color: var(--text-secondary);
-    background: rgba(139, 148, 158, 0.1);
-    padding: 1px 4px;
-    border-radius: 2px;
 }
 
 /* ---- Balance Chart ---- */

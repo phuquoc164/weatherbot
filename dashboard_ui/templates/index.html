@@ -65,23 +65,25 @@
 <!-- Main Grid -->
 <div class="main-grid">
 
-    <!-- LEFT: City Positions + Trade History (spans 2 rows) -->
+    <!-- LEFT: City Stats + Trade History (spans 2 rows) -->
     <div class="panel panel-map">
         <div class="panel-header">
-            <span>City Positions</span>
+            <span>City Stats</span>
             <span class="count">{{ data.locations|length }} cities</span>
         </div>
         <div class="table-wrap">
-            <table class="data-table" aria-label="City positions">
+            <table class="data-table" aria-label="City stats">
                 <thead>
                     <tr>
                         <th>Code</th>
                         <th>City</th>
-                        <th>Temp</th>
-                        <th>Status</th>
-                        <th>Bucket</th>
-                        <th>P&amp;L</th>
-                        <th>σ</th>
+                        <th class="city-sort-col" data-sort="trades">Trades</th>
+                        <th>SL</th>
+                        <th>TP</th>
+                        <th>TS</th>
+                        <th>FC</th>
+                        <th class="city-sort-col" data-sort="winpct">Win%</th>
+                        <th class="city-sort-col" data-sort="pnl">P&amp;L</th>
                     </tr>
                 </thead>
                 <tbody id="city-table-body"></tbody>

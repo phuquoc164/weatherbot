@@ -418,7 +418,8 @@ The client-side JavaScript (`static/dashboard.js`) falls back to polling `GET /a
 | `pnl` | Realized profit/loss |
 | `cost` | Original stake |
 | `close_reason` | `stop_loss` / `trailing_stop` / `forecast_changed` / `take_profit` / `resolved` |
-| `closed_at` | ISO 8601 timestamp |
+| `opened_at` | ISO 8601 timestamp when the position was opened |
+| `closed_at` | ISO 8601 timestamp when the position was closed |
 
 Closed positions are sorted by `closed_at` descending (most recent first).
 

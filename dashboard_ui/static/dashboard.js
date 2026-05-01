@@ -12,78 +12,101 @@
     let currentSource = "main";
 
     // =========================================================================
-    // City Position Table
+    // City Stats Table
     // =========================================================================
-    function updateCityTable(data) {
-        const forecasts   = data.forecasts        || [];
-        const openPos     = data.open_positions   || [];
-        const closedPos   = data.closed_positions || [];
-        const locations   = data.locations        || {};
-        const calibration = data.calibration      || {};
+    let citySort    = { col: "pnl", dir: "desc" };
+    let lastCityData = null;
 
-        // closed_positions arrive sorted descending by closed_at — first hit per city is newest
-        const lastClosed = {};
+    const SORT_LABELS = { trades: "Trades", winpct: "Win%", pnl: "P&L" };
+
+    function renderCityTable() {
+        if (!lastCityData) return;
+        const { closedPos, locations } = lastCityData;
+
+        // Aggregate per city — wins = any trade with P&L > 0
+        const stats = {};
         for (const p of closedPos) {
-            if (!lastClosed[p.city]) lastClosed[p.city] = p;
+            if (!stats[p.city]) stats[p.city] = { trades: 0, sl: 0, tp: 0, ts: 0, fc: 0, wins: 0, pnl: 0 };
+            const s = stats[p.city];
+            s.trades++;
+            s.pnl += p.pnl ?? 0;
+            if (p.close_reason === "stop_loss")                                    s.sl++;
+            else if (p.close_reason === "take_profit" || p.close_reason === "resolved") s.tp++;
+            else if (p.close_reason === "trailing_stop")                           s.ts++;
+            else if (p.close_reason === "forecast_changed")                        s.fc++;
+            if ((p.pnl ?? 0) > 0) s.wins++;
         }
 
-        // minimum sigma across any source with n≥10 for a given city
-        function citySigma(cityKey) {
-            const prefix = cityKey + "_";
-            let min = null;
-            for (const [k, v] of Object.entries(calibration)) {
-                if (k.startsWith(prefix) && v.n >= 10) {
-                    if (min === null || v.sigma < min) min = v.sigma;
-                }
-            }
-            return min;
-        }
+        // Sort entries — cities with no trades always last
+        const entries = Object.entries(locations).map(([key, loc]) => {
+            const s      = stats[key] || { trades: 0, sl: 0, tp: 0, wins: 0, pnl: 0 };
+            const winPct = s.trades > 0 ? (s.wins / s.trades) * 100 : null;
+            return { key, loc, s, winPct };
+        });
+        entries.sort((a, b) => {
+            if (a.s.trades === 0 && b.s.trades === 0) return 0;
+            if (a.s.trades === 0) return 1;
+            if (b.s.trades === 0) return -1;
+            let cmp = 0;
+            if (citySort.col === "trades") cmp = a.s.trades - b.s.trades;
+            else if (citySort.col === "winpct") cmp = (a.winPct ?? 0) - (b.winPct ?? 0);
+            else cmp = a.s.pnl - b.s.pnl;
+            return citySort.dir === "desc" ? -cmp : cmp;
+        });
+
+        // Update sort indicators in header
+        document.querySelectorAll(".city-sort-col").forEach(th => {
+            const col   = th.dataset.sort;
+            const arrow = citySort.col === col ? (citySort.dir === "desc" ? " ▼" : " ▲") : "";
+            th.textContent = SORT_LABELS[col] + arrow;
+        });
 
         let html = "";
-        for (const [key, loc] of Object.entries(locations)) {
-            const forecast = forecasts.find(f => f.city === key);
-            const open     = openPos.find(p => p.city === key);
-            const closed   = lastClosed[key];
-            const sigma    = citySigma(key);
+        for (const { key, loc, s, winPct } of entries) {
+            const pnlCls  = s.pnl >= 0 ? "text-green" : "text-red";
+            const pnlSign = s.pnl >= 0 ? "+" : "";
+            const winStr  = winPct !== null ? winPct.toFixed(0) + "%" : "—";
+            const pnlStr  = s.trades > 0
+                ? `<span class="${pnlCls}">${pnlSign}$${s.pnl.toFixed(2)}</span>`
+                : `<span class="text-muted">—</span>`;
 
-            const temp     = (forecast && forecast.best != null) ? `${forecast.best}°${forecast.unit}` : "—";
-            const sigmaStr = sigma !== null ? sigma.toFixed(1) : "—";
-
-            let statusHtml, bucketHtml, pnlHtml;
-            if (open) {
-                const pnlCls = (open.pnl ?? 0) >= 0 ? "text-green" : "text-red";
-                const sign   = (open.pnl ?? 0) >= 0 ? "+" : "";
-                statusHtml = `<span class="city-status-open">OPEN</span>`;
-                bucketHtml = `${open.bucket_low}–${open.bucket_high}°${open.unit || ""}`;
-                pnlHtml    = `<span class="${pnlCls}">${sign}$${(open.pnl ?? 0).toFixed(2)}</span>`;
-            } else if (closed) {
-                const pnlCls = (closed.pnl ?? 0) >= 0 ? "text-green" : "text-red";
-                const sign   = (closed.pnl ?? 0) >= 0 ? "+" : "";
-                statusHtml = `<span class="city-status-closed">CLOSED</span>`;
-                bucketHtml = closed.bucket_low != null
-                    ? `${closed.bucket_low}–${closed.bucket_high}°${closed.unit || ""}`
-                    : "—";
-                pnlHtml    = `<span class="${pnlCls}">${sign}$${(closed.pnl ?? 0).toFixed(2)}</span>`;
-            } else {
-                statusHtml = `<span class="text-muted">—</span>`;
-                bucketHtml = "—";
-                pnlHtml    = "—";
-            }
-
-            html += `<div class="city-table-row">` +
-                `<span class="city-table-code">${key.toUpperCase().slice(0, 3)}</span>` +
-                `<span class="city-table-name">${loc.name}</span>` +
-                `<span class="city-table-temp">${temp}</span>` +
-                `<span>${statusHtml}</span>` +
-                `<span class="city-table-bucket">${bucketHtml}</span>` +
-                `<span class="city-table-pnl">${pnlHtml}</span>` +
-                `<span class="city-table-sigma text-muted">${sigmaStr}</span>` +
-                `</div>`;
+            html += `<tr>` +
+                `<td class="col-code">${key.toUpperCase().slice(0, 3)}</td>` +
+                `<td><div class="city-name">${loc.name}</div></td>` +
+                `<td class="col-num">${s.trades || "—"}</td>` +
+                `<td class="col-num text-red">${s.sl || "—"}</td>` +
+                `<td class="col-num text-green">${s.tp || "—"}</td>` +
+                `<td class="col-num text-yellow">${s.ts || "—"}</td>` +
+                `<td class="col-num text-blue">${s.fc || "—"}</td>` +
+                `<td class="col-num">${winStr}</td>` +
+                `<td class="col-num">${pnlStr}</td>` +
+                `</tr>`;
         }
 
-        const body = document.getElementById("city-table-body");
-        body.innerHTML = html || `<div class="empty-state">No city data</div>`;
+        document.getElementById("city-table-body").innerHTML =
+            html || `<tr><td colspan="9" class="empty-cell">No city data</td></tr>`;
     }
+
+    function updateCityTable(data) {
+        lastCityData = {
+            closedPos: data.closed_positions || [],
+            locations: data.locations        || {},
+        };
+        renderCityTable();
+    }
+
+    document.querySelectorAll(".city-sort-col").forEach(th => {
+        th.addEventListener("click", () => {
+            const col = th.dataset.sort;
+            if (citySort.col === col) {
+                citySort.dir = citySort.dir === "desc" ? "asc" : "desc";
+            } else {
+                citySort.col = col;
+                citySort.dir = "desc";
+            }
+            renderCityTable();
+        });
+    });
 
     // =========================================================================
     // Chart.js — Balance History
@@ -141,43 +164,89 @@
         },
     });
 
-    function updateChart(history) {
-        if (!history || history.length === 0) {
+    let allBalanceHistory = [];
+    let activePeriod = "1W";
+
+    const PERIOD_MS = { "1D": 86400000, "1W": 604800000, "1M": 2592000000 };
+
+    function filterHistory(history, period) {
+        if (period === "ALL" || !PERIOD_MS[period]) return history;
+        const cutoff = Date.now() - PERIOD_MS[period];
+        return history.filter(h => new Date(h.ts).getTime() >= cutoff);
+    }
+
+    function labelForPeriod(ts, period) {
+        const d = new Date(ts);
+        if (period === "1D") {
+            return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }
+        if (period === "1W") {
+            return d.toLocaleDateString([], { month: "numeric", day: "numeric" })
+                + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }
+        return d.toLocaleDateString([], { month: "numeric", day: "numeric" });
+    }
+
+    function renderChart(period) {
+        const slice = filterHistory(allBalanceHistory, period);
+        if (!slice || slice.length === 0) {
             balanceChart.data.labels = [];
             balanceChart.data.datasets[0].data = [];
             balanceChart.update("none");
             return;
         }
-        balanceChart.data.labels = history.map(h => {
-            const d = new Date(h.ts);
-            return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        });
-        balanceChart.data.datasets[0].data = history.map(h => h.balance);
+        balanceChart.data.labels = slice.map(h => labelForPeriod(h.ts, period));
+        balanceChart.data.datasets[0].data = slice.map(h => h.balance);
         balanceChart.update("none");
     }
+
+    function updateChart(history) {
+        allBalanceHistory = history || [];
+        renderChart(activePeriod);
+    }
+
+    document.querySelectorAll(".period-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll(".period-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            activePeriod = btn.dataset.period;
+            renderChart(activePeriod);
+        });
+    });
 
     // =========================================================================
     // Update KPIs
     // =========================================================================
     function updateKPIs(kpi) {
-        document.getElementById("kpi-starting").textContent = "$" + kpi.starting_balance.toFixed(2);
-        document.getElementById("kpi-open-cost").textContent = "$" + kpi.open_cost.toFixed(2);
-        document.getElementById("kpi-cash").textContent = "$" + kpi.cash.toFixed(2);
+        document.getElementById("kpi-equity").textContent = "$" + kpi.equity.toFixed(2);
 
         function setPnl(id, value) {
             const el = document.getElementById(id);
+            if (!el) return;
             el.textContent = (value >= 0 ? "+" : "") + "$" + value.toFixed(2);
             el.className = "kpi-value " + (value >= 0 ? "text-green" : "text-red");
         }
+
+        const totalEl = document.getElementById("kpi-total-pnl");
+        if (totalEl) {
+            const sign = kpi.total_pnl >= 0 ? "+" : "";
+            totalEl.className = "kpi-value " + (kpi.total_pnl >= 0 ? "text-green" : "text-red");
+            totalEl.childNodes[0].textContent = sign + "$" + kpi.total_pnl.toFixed(2) + " ";
+        }
+        const pctEl = document.getElementById("kpi-total-pnl-pct");
+        if (pctEl) {
+            const sign = kpi.total_pnl_pct >= 0 ? "+" : "";
+            pctEl.textContent = "(" + sign + kpi.total_pnl_pct.toFixed(1) + "%)";
+        }
+
         setPnl("kpi-realized", kpi.realized_pnl);
         setPnl("kpi-unrealized", kpi.unrealized_pnl);
 
-        document.getElementById("kpi-open").textContent = kpi.open_count;
         document.getElementById("kpi-winrate").textContent = kpi.win_rate !== null ? kpi.win_rate.toFixed(1) + "%" : "—";
 
         const ddEl = document.getElementById("kpi-drawdown");
-        ddEl.textContent = kpi.drawdown.toFixed(1) + "%";
-        ddEl.className = "kpi-value " + (kpi.drawdown < 0 ? "text-red" : "text-muted");
+        ddEl.textContent = kpi.max_drawdown.toFixed(1) + "%";
+        ddEl.className = "kpi-value " + (kpi.max_drawdown > 0 ? "text-red" : "text-muted");
     }
 
     // =========================================================================
@@ -189,7 +258,7 @@
         count.textContent = positions.length + " active";
 
         if (positions.length === 0) {
-            body.innerHTML = '<div class="empty-state">No open positions</div>';
+            body.innerHTML = '<tr><td colspan="7" class="empty-cell">No open positions</td></tr>';
             return;
         }
 
@@ -204,39 +273,15 @@
             const evText   = p.ev   != null ? "+" + p.ev.toFixed(2)   : "—";
             const kellyText = p.kelly != null ? p.kelly.toFixed(2) : "—";
             const entryText = p.entry_price != null ? "$" + p.entry_price.toFixed(3) : "—";
-            html += `<div class="table-row">` +
-                `<span>${p.city.toUpperCase().slice(0, 3)}</span>` +
-                `<span style="font-family:var(--font-mono);font-size:9px;color:var(--text-secondary)">${p.date || "—"}</span>` +
-                `<span>${p.bucket_low}-${p.bucket_high}°${p.unit}</span>` +
-                `<span>${entryText} → ${curPrice}</span>` +
-                `<span class="text-green">${evText}</span>` +
-                `<span>${kellyText}</span>` +
-                `<span class="${pnlClass}">${pnlText}</span>` +
-                `</div>`;
-        }
-        body.innerHTML = html;
-    }
-
-    // =========================================================================
-    // Update Forecasts Table
-    // =========================================================================
-    function updateForecasts(forecasts) {
-        const body = document.getElementById("forecast-body");
-
-        if (!forecasts || forecasts.length === 0) {
-            body.innerHTML = '<div class="empty-state">Waiting for first scan...</div>';
-            return;
-        }
-
-        let html = "";
-        for (const f of forecasts) {
-            html += `<div class="forecast-row">` +
-                `<span style="font-weight:600;">${f.city.toUpperCase().slice(0, 3)}</span>` +
-                `<span>${f.ecmwf !== null && f.ecmwf !== undefined ? f.ecmwf + "°" : "—"}</span>` +
-                `<span>${f.hrrr !== null && f.hrrr !== undefined ? f.hrrr + "°" : "—"}</span>` +
-                `<span>${f.metar !== null && f.metar !== undefined ? f.metar + "°" : "—"}</span>` +
-                `<span class="best">${f.best}°${f.unit}</span>` +
-                `</div>`;
+            html += `<tr>` +
+                `<td class="col-code">${p.city.toUpperCase().slice(0, 3)}</td>` +
+                `<td class="col-mono">${p.date || "—"}</td>` +
+                `<td>${p.bucket_low}-${p.bucket_high}°${p.unit}</td>` +
+                `<td class="col-mono">${entryText} → ${curPrice}</td>` +
+                `<td class="text-green">${evText}</td>` +
+                `<td class="col-mono text-muted">${kellyText}</td>` +
+                `<td class="${pnlClass}">${pnlText}</td>` +
+                `</tr>`;
         }
         body.innerHTML = html;
     }
@@ -269,37 +314,115 @@
     }
 
     // =========================================================================
-    // Update Trade History
+    // Trade History — filters
     // =========================================================================
-    function updateHistory(trades) {
-        const body = document.getElementById("history-body");
-        const count = document.getElementById("history-count");
-        count.textContent = trades.length + " closed";
+    let allHistory = [];
+    let historySortDir = null; // null = closed_at desc (backend order), "desc" = P&L high→low, "asc" = P&L low→high
+
+    function fmtTs(ts) {
+        if (!ts) return "—";
+        return ts.slice(0, 16).replace("T", " ");
+    }
+
+    function fmtDuration(openedAt, closedAt) {
+        if (!openedAt || !closedAt) return "—";
+        const ms = new Date(closedAt) - new Date(openedAt);
+        if (ms <= 0) return "—";
+        const totalMins = Math.floor(ms / 60000);
+        const days  = Math.floor(totalMins / 1440);
+        const hours = Math.floor((totalMins % 1440) / 60);
+        const mins  = totalMins % 60;
+        if (days > 0)  return `${days}d ${hours}h`;
+        if (hours > 0) return `${hours}h ${mins}m`;
+        return `${mins}m`;
+    }
+
+    function renderHistory() {
+        const cityVal   = document.getElementById("history-filter-city").value;
+        const reasonVal = document.getElementById("history-filter-reason").value;
+
+        let trades = allHistory.slice();
+        if (cityVal)   trades = trades.filter(t => t.city_name    === cityVal);
+        if (reasonVal) trades = trades.filter(t => t.close_reason === reasonVal);
+
+        if (historySortDir !== null) {
+            trades.sort((a, b) => {
+                const cmp = (a.pnl ?? 0) - (b.pnl ?? 0);
+                return historySortDir === "desc" ? -cmp : cmp;
+            });
+        }
+
+        const histSortTh = document.querySelector(".history-sort-col");
+        if (histSortTh) {
+            histSortTh.textContent = historySortDir === "desc" ? "P&L ▼"
+                                   : historySortDir === "asc"  ? "P&L ▲"
+                                   : "P&L";
+        }
+
+        const body      = document.getElementById("history-body");
+        const count     = document.getElementById("history-count");
+        const total     = allHistory.length;
+        const filtered  = trades.length;
+        const pnl       = trades.reduce((s, t) => s + (t.pnl ?? 0), 0);
+        const pnlStr    = `<span class="${pnl >= 0 ? "text-green" : "text-red"}">${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}</span>`;
+        if ((cityVal || reasonVal) && filtered < total) {
+            const pct = total > 0 ? (filtered / total * 100).toFixed(1) : "0.0";
+            count.innerHTML = `${filtered}/${total} closed (${pct}%) · ${pnlStr}`;
+        } else {
+            count.innerHTML = `${total} closed · ${pnlStr}`;
+        }
 
         if (trades.length === 0) {
-            body.innerHTML = '<div class="empty-state">No closed trades yet</div>';
+            body.innerHTML = '<tr><td colspan="8" class="empty-cell">No closed trades yet</td></tr>';
             return;
         }
 
         let html = "";
         for (const t of trades) {
-            const pnl = t.pnl ?? 0;
+            const pnl      = t.pnl ?? 0;
             const pnlClass = pnl >= 0 ? "text-green" : "text-red";
-            const pnlSign = pnl >= 0 ? "+" : "";
-            const reason = t.close_reason || "unknown";
-
-            const entryP = t.entry_price != null ? "$" + t.entry_price.toFixed(3) : "—";
-            const exitP  = t.exit_price  != null ? "$" + t.exit_price.toFixed(3)  : "—";
-            html += `<div class="history-row">` +
-                `<span>${t.city_name}</span>` +
-                `<span>${t.date}</span>` +
-                `<span>${entryP} → ${exitP}</span>` +
-                `<span class="reason-badge reason-${reason}">${reason}</span>` +
-                `<span class="${pnlClass}">${pnlSign}$${pnl.toFixed(2)}</span>` +
-                `</div>`;
+            const pnlSign  = pnl >= 0 ? "+" : "";
+            const reason    = t.close_reason || "unknown";
+            const entryText = t.entry_price != null ? "$" + t.entry_price.toFixed(3) : "—";
+            const exitText  = t.exit_price  != null ? "$" + t.exit_price.toFixed(3)  : "—";
+            html += `<tr>` +
+                `<td>${t.city_name}</td>` +
+                `<td class="col-mono">${t.date || "—"}</td>` +
+                `<td class="col-mono">${fmtTs(t.opened_at)}</td>` +
+                `<td class="col-mono">${fmtTs(t.closed_at)}</td>` +
+                `<td class="col-mono">${fmtDuration(t.opened_at, t.closed_at)}</td>` +
+                `<td class="col-mono">${entryText} → ${exitText}</td>` +
+                `<td><span class="reason-badge reason-${reason}">${reason}</span></td>` +
+                `<td class="${pnlClass}">${pnlSign}$${pnl.toFixed(2)}</td>` +
+                `</tr>`;
         }
         body.innerHTML = html;
     }
+
+    function updateHistory(trades) {
+        allHistory = trades || [];
+
+        const cityEl   = document.getElementById("history-filter-city");
+        const prevCity = cityEl.value;
+        const cities   = [...new Set(allHistory.map(t => t.city_name))].sort();
+        cityEl.innerHTML = '<option value="">All cities</option>' +
+            cities.map(c => `<option value="${c}"${c === prevCity ? " selected" : ""}>${c}</option>`).join("");
+
+        const reasonEl   = document.getElementById("history-filter-reason");
+        const prevReason = reasonEl.value;
+        const reasons    = [...new Set(allHistory.map(t => t.close_reason).filter(Boolean))].sort();
+        reasonEl.innerHTML = '<option value="">All reasons</option>' +
+            reasons.map(r => `<option value="${r}"${r === prevReason ? " selected" : ""}>${r}</option>`).join("");
+
+        renderHistory();
+    }
+
+    document.getElementById("history-filter-city").addEventListener("change", renderHistory);
+    document.getElementById("history-filter-reason").addEventListener("change", renderHistory);
+    document.querySelector(".history-sort-col").addEventListener("click", () => {
+        historySortDir = historySortDir === null ? "desc" : historySortDir === "desc" ? "asc" : null;
+        renderHistory();
+    });
 
     // =========================================================================
     // Update Activity Feed
@@ -314,7 +437,7 @@
             html += `<div class="activity-entry ${ev.type}">${ts} ${ev.msg}</div>`;
         }
         feed.innerHTML = html;
-        feed.scrollTop = feed.scrollHeight;
+        feed.scrollTop = 0;
     }
 
     // =========================================================================
@@ -343,7 +466,6 @@
             updateChart(data.balance_history);
             updatePositions(data.open_positions || []);
             updateHistory(data.closed_positions || []);
-            updateForecasts(data.forecasts || []);
             updateCalibration(data.calibration);
             updateActivity(data.activity || []);
         } catch (e) {

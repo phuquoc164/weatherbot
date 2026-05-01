@@ -168,14 +168,15 @@ Five pre-built configs are included: `baseline`, `prob_model`, `time_decay`, `dy
 
 ### Bloomberg Dashboard (`/`)
 
-- **KPI Strip** — Starting balance, open cost, realized/unrealized P&L, cash, win rate, drawdown
-- **World Map** — Interactive Leaflet.js map with 20 city markers showing forecast, EV, and position status
-- **Open Positions** — Live table with entry → current price and unrealized P&L
-- **Trade History** — Closed positions with close reason and realized P&L
-- **Forecast Sources** — Side-by-side comparison of ECMWF, HRRR, and METAR for all cities
-- **Calibration** — Forecast accuracy (sigma) per city/source
-- **Activity Feed** — Real-time event log (buys, exits, forecasts)
-- **Balance Chart** — Equity history over time
+Layout: three-column grid (left spans full height, center splits top/bottom, right spans full height).
+
+- **KPI Strip** — Total balance, total P&L (with %), realized P&L, unrealized P&L, win rate, max drawdown
+- **City Stats** *(left top)* — Per-city trade counts (SL/TP/TS/FC breakdown), win rate, and P&L; columns sortable by Trades, Win%, or P&L
+- **Open Positions** *(left bottom)* — Live table with entry → current price, EV, Kelly, and unrealized P&L
+- **Balance History** *(center top)* — Equity curve with 1D/1W/1M/ALL period selector
+- **Trade History** *(center bottom)* — Closed positions with entry→exit prices, duration, close reason, and realized P&L; P&L column sortable; filterable by city and close reason
+- **Activity Feed** *(right top)* — Real-time event log (buys, exits, forecasts)
+- **Calibration** *(right bottom)* — Forecast accuracy (sigma) per city/source with color-coded bar chart
 - **Real-time updates** via WebSocket (file-watcher based, no polling)
 - **Source selector** — dropdown to switch between main thread and running strategy variants; hides automatically when no variants are configured
 - **Strategy comparison** — Bloomberg-style table with P&L, ROI, win rate, avg EV, and sparkline equity curve for all sources side-by-side

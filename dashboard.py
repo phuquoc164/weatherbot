@@ -72,7 +72,6 @@ LOCATIONS = {
 # IN-MEMORY STATE
 # =============================================================================
 
-balance_history: list = []          # [{ts, balance}, ...]
 activity_feed: deque = deque(maxlen=100)   # recent events
 previous_markets: dict = {}         # last snapshot keyed by stem
 connected_clients: set = set()      # active WebSocket connections
@@ -249,6 +248,7 @@ def _project_closed_position(market: dict, position: dict) -> dict:
         "pnl":          position.get("pnl", 0),
         "cost":         position.get("cost"),
         "close_reason": position.get("close_reason", "unknown"),
+        "opened_at":    position.get("opened_at"),
         "closed_at":    position.get("closed_at"),
     }
 
@@ -275,18 +275,20 @@ def _project_latest_forecast(market: dict) -> Optional[dict]:
 
 def _compute_equity_kpis(starting: float, open_positions: list,
                           closed_positions: list, markets: dict) -> dict:
-    """Compute KPI fields: realized/unrealized P&L, cash, equity, win rate, drawdown."""
+    """Compute KPI fields: equity, total P&L, realized/unrealized P&L, win rate, max drawdown."""
     realized_pnl   = round(sum(p["pnl"] for p in closed_positions), 2)
     unrealized_pnl = round(sum(p["pnl"] for p in open_positions), 2)
     open_cost      = round(sum(p.get("cost", 0) for p in open_positions), 2)
     cash           = round(starting + realized_pnl - open_cost, 2)
     equity         = round(cash + open_cost + unrealized_pnl, 2)
+    total_pnl      = round(equity - starting, 2)
+    total_pnl_pct  = round(total_pnl / starting * 100, 2) if starting else 0.0
 
     wins         = sum(1 for p in closed_positions if p.get("pnl", 0) > 0)
     total_closed = len(closed_positions)
     win_rate     = (wins / total_closed * 100) if total_closed > 0 else None
 
-    # Replay equity chronologically to find peak for drawdown
+    # Replay equity chronologically to find worst peak-to-trough (max drawdown)
     events = [
         (pos["closed_at"], pos.get("pnl", 0) or 0)
         for m in markets.values()
@@ -295,25 +297,26 @@ def _compute_equity_kpis(starting: float, open_positions: list,
     events.sort(key=lambda x: x[0])
     running_equity = starting
     peak = starting
+    max_drawdown = 0.0
     for _, pnl_val in events:
         running_equity += pnl_val
         if running_equity > peak:
             peak = running_equity
-    if equity > peak:
-        peak = equity
-
-    drawdown = ((equity - peak) / peak * 100) if peak > 0 else 0
+        dd = ((peak - running_equity) / peak * 100) if peak > 0 else 0.0
+        if dd > max_drawdown:
+            max_drawdown = dd
+    current_dd = ((peak - equity) / peak * 100) if equity < peak and peak > 0 else 0.0
+    if current_dd > max_drawdown:
+        max_drawdown = current_dd
 
     return {
-        "starting_balance": starting,
-        "open_cost":        open_cost,
-        "realized_pnl":     realized_pnl,
-        "cash":             cash,
-        "unrealized_pnl":   unrealized_pnl,
-        "equity":           equity,
-        "open_count":       len(open_positions),
-        "win_rate":         round(win_rate, 1) if win_rate is not None else None,
-        "drawdown":         round(drawdown, 1),
+        "equity":         equity,
+        "total_pnl":      total_pnl,
+        "total_pnl_pct":  total_pnl_pct,
+        "realized_pnl":   realized_pnl,
+        "unrealized_pnl": unrealized_pnl,
+        "win_rate":       round(win_rate, 1) if win_rate is not None else None,
+        "max_drawdown":   round(max_drawdown, 1),
     }
 
 
@@ -352,13 +355,15 @@ def build_dashboard_data(
 
     starting = state.get("starting_balance", 1000.0)
     kpi      = _compute_equity_kpis(starting, open_positions, closed_positions, markets)
-    equity   = kpi.pop("equity")  # internal use only — not exposed in the KPI strip
+    equity   = kpi["equity"]
 
-    # Track balance history (main thread only — variants must not pollute shared state)
-    now_str = datetime.now(timezone.utc).isoformat()
+    # Reconstruct balance history from closed positions so period filters work correctly.
+    # For the main bot, append a live point so the chart always ends at the current state.
+    bh = _build_variant_balance_history(closed_positions, starting)
     if not is_variant:
-        if not balance_history or balance_history[-1]["balance"] != equity:
-            balance_history.append({"ts": now_str, "balance": equity})
+        now_str = datetime.now(timezone.utc).isoformat()
+        if not bh or bh[-1]["balance"] != round(equity, 2):
+            bh.append({"ts": now_str, "balance": round(equity, 2)})
 
     return {
         "state":           state,
@@ -368,7 +373,7 @@ def build_dashboard_data(
         "forecasts":       forecasts,
         "calibration":     calibration,
         "bot_status":      bot_status,
-        "balance_history": balance_history if not is_variant else _build_variant_balance_history(closed_positions, starting),
+        "balance_history": bh,
         "activity":        list(activity_feed) if not is_variant else [],
         "locations":       LOCATIONS,
     }

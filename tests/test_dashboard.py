@@ -380,27 +380,111 @@ class TestBuildDashboardDataVariant(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self._history_snapshot = len(dashboard.balance_history)
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
-        del dashboard.balance_history[self._history_snapshot:]
 
-    def test_is_variant_does_not_mutate_balance_history(self):
-        before = len(dashboard.balance_history)
-        build_dashboard_data(data_dir=self.tmp, is_variant=True)
-        self.assertEqual(len(dashboard.balance_history), before)
+    def test_variant_balance_history_empty_without_trades(self):
+        result = build_dashboard_data(data_dir=self.tmp, is_variant=True)
+        self.assertEqual(result["balance_history"], [])
 
-    def test_is_variant_false_appends_to_balance_history(self):
-        # Write a state.json with a balance that won't match any existing tail
-        state_file = self.tmp / "state.json"
-        state_file.write_text(
-            json.dumps({"balance": 88888.88, "starting_balance": 1000.0}), encoding="utf-8"
+    def test_main_bot_balance_history_always_has_live_point(self):
+        # No trades — history should still have one point (the live balance)
+        (self.tmp / "state.json").write_text(
+            json.dumps({"balance": 1000.0, "starting_balance": 1000.0}), encoding="utf-8"
         )
-        before = len(dashboard.balance_history)
         with patch.object(dashboard, "check_bot_status", return_value=_MOCK_BOT_STATUS):
-            build_dashboard_data(data_dir=self.tmp, is_variant=False)
-        self.assertGreater(len(dashboard.balance_history), before)
+            result = build_dashboard_data(data_dir=self.tmp, is_variant=False)
+        history = result["balance_history"]
+        self.assertGreater(len(history), 0)
+        self.assertIn("ts", history[-1])
+        self.assertIn("balance", history[-1])
+
+    def test_main_bot_balance_history_uses_real_timestamps(self):
+        # Closed trade with a past timestamp should appear in history, not just 'now'
+        (self.tmp / "state.json").write_text(
+            json.dumps({"balance": 1050.0, "starting_balance": 1000.0}), encoding="utf-8"
+        )
+        markets = self.tmp / "markets"
+        markets.mkdir(parents=True)
+        (markets / "nyc.json").write_text(
+            json.dumps({
+                "city": "nyc", "city_name": "New York City", "date": "2026-04-01",
+                "position": {"status": "closed", "pnl": 50.0,
+                             "closed_at": "2026-04-01T10:00:00"},
+            }),
+            encoding="utf-8",
+        )
+        with patch.object(dashboard, "check_bot_status", return_value=_MOCK_BOT_STATUS):
+            result = build_dashboard_data(data_dir=self.tmp, is_variant=False)
+        history = result["balance_history"]
+        self.assertGreaterEqual(len(history), 1)
+        self.assertIn("2026-04-01", history[0]["ts"])
+        self.assertAlmostEqual(history[0]["balance"], 1050.0, places=2)
+
+
+class TestTradeHistoryFilters(unittest.TestCase):
+    """Verify that closed_positions carries the fields the JS filters rely on,
+    and that filtering/sorting produces the correct subsets."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        markets = self.tmp / "markets"
+        markets.mkdir(parents=True)
+        (self.tmp / "state.json").write_text(
+            json.dumps({"starting_balance": 1000.0}), encoding="utf-8"
+        )
+        trades = [
+            ("nyc",     "New York City", "stop_loss",   -5.0,  "2026-04-01T08:00:00", "2026-04-01T10:00:00"),
+            ("miami",   "Miami",         "take_profit",  15.0, "2026-04-02T06:00:00", "2026-04-02T10:00:00"),
+            ("chicago", "Chicago",       "stop_loss",   -3.0,  "2026-04-03T09:00:00", "2026-04-03T10:00:00"),
+            ("dallas",  "Dallas",        "take_profit",  8.0,  "2026-04-04T07:00:00", "2026-04-04T10:00:00"),
+        ]
+        for city, city_name, reason, pnl, opened_at, closed_at in trades:
+            (markets / f"{city}.json").write_text(json.dumps({
+                "city": city, "city_name": city_name, "date": closed_at[:10],
+                "position": {
+                    "status": "closed", "pnl": pnl,
+                    "close_reason": reason, "opened_at": opened_at, "closed_at": closed_at,
+                    "entry_price": 0.5, "exit_price": 0.6,
+                },
+            }), encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _closed(self):
+        with patch.object(dashboard, "check_bot_status", return_value=_MOCK_BOT_STATUS):
+            return build_dashboard_data(data_dir=self.tmp)["closed_positions"]
+
+    def test_all_positions_have_filter_fields(self):
+        for pos in self._closed():
+            self.assertIn("city_name",    pos)
+            self.assertIn("close_reason", pos)
+            self.assertIn("opened_at",    pos)
+            self.assertIn("closed_at",    pos)
+
+    def test_filter_by_city_returns_only_that_city(self):
+        filtered = [p for p in self._closed() if p["city_name"] == "Miami"]
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["close_reason"], "take_profit")
+
+    def test_filter_by_reason_returns_only_matching_trades(self):
+        filtered = [p for p in self._closed() if p["close_reason"] == "stop_loss"]
+        self.assertEqual(len(filtered), 2)
+        self.assertTrue(all(p["close_reason"] == "stop_loss" for p in filtered))
+
+    def test_filter_city_and_reason_combined(self):
+        closed = self._closed()
+        filtered = [p for p in closed
+                    if p["city_name"] == "New York City" and p["close_reason"] == "stop_loss"]
+        self.assertEqual(len(filtered), 1)
+        self.assertAlmostEqual(filtered[0]["pnl"], -5.0)
+
+    def test_filter_returns_empty_for_unknown_city(self):
+        filtered = [p for p in self._closed() if p["city_name"] == "Los Angeles"]
+        self.assertEqual(filtered, [])
+
 
 
 if __name__ == "__main__":

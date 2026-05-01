@@ -70,19 +70,19 @@
                 pnlHtml    = "—";
             }
 
-            html += `<div class="city-table-row">` +
-                `<span class="city-table-code">${key.toUpperCase().slice(0, 3)}</span>` +
-                `<span class="city-table-name">${loc.name}</span>` +
-                `<span class="city-table-temp">${temp}</span>` +
-                `<span>${statusHtml}</span>` +
-                `<span class="city-table-bucket">${bucketHtml}</span>` +
-                `<span class="city-table-pnl">${pnlHtml}</span>` +
-                `<span class="city-table-sigma text-muted">${sigmaStr}</span>` +
-                `</div>`;
+            html += `<tr>` +
+                `<td class="col-code">${key.toUpperCase().slice(0, 3)}</td>` +
+                `<td><div class="city-name">${loc.name}</div></td>` +
+                `<td class="col-mono text-blue">${temp}</td>` +
+                `<td>${statusHtml}</td>` +
+                `<td class="col-mono">${bucketHtml}</td>` +
+                `<td>${pnlHtml}</td>` +
+                `<td class="col-mono text-muted">${sigmaStr}</td>` +
+                `</tr>`;
         }
 
         const body = document.getElementById("city-table-body");
-        body.innerHTML = html || `<div class="empty-state">No city data</div>`;
+        body.innerHTML = html || `<tr><td colspan="7" class="empty-cell">No city data</td></tr>`;
     }
 
     // =========================================================================
@@ -189,7 +189,7 @@
         count.textContent = positions.length + " active";
 
         if (positions.length === 0) {
-            body.innerHTML = '<div class="empty-state">No open positions</div>';
+            body.innerHTML = '<tr><td colspan="7" class="empty-cell">No open positions</td></tr>';
             return;
         }
 
@@ -204,15 +204,15 @@
             const evText   = p.ev   != null ? "+" + p.ev.toFixed(2)   : "—";
             const kellyText = p.kelly != null ? p.kelly.toFixed(2) : "—";
             const entryText = p.entry_price != null ? "$" + p.entry_price.toFixed(3) : "—";
-            html += `<div class="table-row">` +
-                `<span>${p.city.toUpperCase().slice(0, 3)}</span>` +
-                `<span style="font-family:var(--font-mono);font-size:9px;color:var(--text-secondary)">${p.date || "—"}</span>` +
-                `<span>${p.bucket_low}-${p.bucket_high}°${p.unit}</span>` +
-                `<span>${entryText} → ${curPrice}</span>` +
-                `<span class="text-green">${evText}</span>` +
-                `<span>${kellyText}</span>` +
-                `<span class="${pnlClass}">${pnlText}</span>` +
-                `</div>`;
+            html += `<tr>` +
+                `<td class="col-code">${p.city.toUpperCase().slice(0, 3)}</td>` +
+                `<td class="col-mono">${p.date || "—"}</td>` +
+                `<td>${p.bucket_low}-${p.bucket_high}°${p.unit}</td>` +
+                `<td class="col-mono">${entryText} → ${curPrice}</td>` +
+                `<td class="text-green">${evText}</td>` +
+                `<td class="col-mono text-muted">${kellyText}</td>` +
+                `<td class="${pnlClass}">${pnlText}</td>` +
+                `</tr>`;
         }
         body.innerHTML = html;
     }
@@ -224,19 +224,19 @@
         const body = document.getElementById("forecast-body");
 
         if (!forecasts || forecasts.length === 0) {
-            body.innerHTML = '<div class="empty-state">Waiting for first scan...</div>';
+            body.innerHTML = '<tr><td colspan="5" class="empty-cell">Waiting for first scan...</td></tr>';
             return;
         }
 
         let html = "";
         for (const f of forecasts) {
-            html += `<div class="forecast-row">` +
-                `<span style="font-weight:600;">${f.city.toUpperCase().slice(0, 3)}</span>` +
-                `<span>${f.ecmwf !== null && f.ecmwf !== undefined ? f.ecmwf + "°" : "—"}</span>` +
-                `<span>${f.hrrr !== null && f.hrrr !== undefined ? f.hrrr + "°" : "—"}</span>` +
-                `<span>${f.metar !== null && f.metar !== undefined ? f.metar + "°" : "—"}</span>` +
-                `<span class="best">${f.best}°${f.unit}</span>` +
-                `</div>`;
+            html += `<tr>` +
+                `<td class="col-code">${f.city.toUpperCase().slice(0, 3)}</td>` +
+                `<td class="col-mono">${f.ecmwf !== null && f.ecmwf !== undefined ? f.ecmwf + "°" : "—"}</td>` +
+                `<td class="col-mono">${f.hrrr !== null && f.hrrr !== undefined ? f.hrrr + "°" : "—"}</td>` +
+                `<td class="col-mono">${f.metar !== null && f.metar !== undefined ? f.metar + "°" : "—"}</td>` +
+                `<td class="col-mono text-green">${f.best}°${f.unit}</td>` +
+                `</tr>`;
         }
         body.innerHTML = html;
     }
@@ -277,7 +277,7 @@
         count.textContent = trades.length + " closed";
 
         if (trades.length === 0) {
-            body.innerHTML = '<div class="empty-state">No closed trades yet</div>';
+            body.innerHTML = '<tr><td colspan="5" class="empty-cell">No closed trades yet</td></tr>';
             return;
         }
 
@@ -290,13 +290,13 @@
 
             const entryP = t.entry_price != null ? "$" + t.entry_price.toFixed(3) : "—";
             const exitP  = t.exit_price  != null ? "$" + t.exit_price.toFixed(3)  : "—";
-            html += `<div class="history-row">` +
-                `<span>${t.city_name}</span>` +
-                `<span>${t.date}</span>` +
-                `<span>${entryP} → ${exitP}</span>` +
-                `<span class="reason-badge reason-${reason}">${reason}</span>` +
-                `<span class="${pnlClass}">${pnlSign}$${pnl.toFixed(2)}</span>` +
-                `</div>`;
+            html += `<tr>` +
+                `<td>${t.city_name}</td>` +
+                `<td class="col-mono">${t.date}</td>` +
+                `<td class="col-mono">${entryP} → ${exitP}</td>` +
+                `<td><span class="reason-badge reason-${reason}">${reason}</span></td>` +
+                `<td class="${pnlClass}">${pnlSign}$${pnl.toFixed(2)}</td>` +
+                `</tr>`;
         }
         body.innerHTML = html;
     }

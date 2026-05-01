@@ -437,7 +437,7 @@
             html += `<div class="activity-entry ${ev.type}">${ts} ${ev.msg}</div>`;
         }
         feed.innerHTML = html;
-        feed.scrollTop = feed.scrollHeight;
+        feed.scrollTop = 0;
     }
 
     // =========================================================================

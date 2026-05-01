@@ -65,7 +65,7 @@
 <!-- Main Grid -->
 <div class="main-grid">
 
-    <!-- LEFT: City Stats + Trade History (spans 2 rows) -->
+    <!-- LEFT: City Stats + Open Positions (spans 2 rows) -->
     <div class="panel panel-map">
         <div class="panel-header">
             <span>City Stats</span>
@@ -91,27 +91,19 @@
         </div>
 
         <div class="panel-header" style="margin-top:8px;">
-            <span>Trade History</span>
-            <span class="count" id="history-count">{{ data.closed_positions|length }} closed</span>
-        </div>
-        <div class="history-filters">
-            <select id="history-filter-city" aria-label="Filter by city">
-                <option value="">All cities</option>
-            </select>
-            <select id="history-filter-reason" aria-label="Filter by reason">
-                <option value="">All reasons</option>
-            </select>
+            <span>Open Positions</span>
+            <span class="count" id="positions-count">{{ data.open_positions|length }} active</span>
         </div>
         <div class="table-wrap">
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>City</th><th>Market</th><th>Opened</th><th>Closed</th><th>Dur.</th><th>Entry→Exit</th><th>Reason</th><th>P&amp;L</th>
+                        <th>City</th><th>Date</th><th>Bucket</th><th>Entry → Now</th><th>EV</th><th>Kelly</th><th>P&amp;L</th>
                     </tr>
                 </thead>
-                <tbody id="history-body">
-                    {% if not data.closed_positions %}
-                    <tr><td colspan="8" class="empty-cell">No closed trades yet</td></tr>
+                <tbody id="positions-body">
+                    {% if not data.open_positions %}
+                    <tr><td colspan="7" class="empty-cell">No open positions</td></tr>
                     {% endif %}
                 </tbody>
             </table>
@@ -134,8 +126,20 @@
         </div>
     </div>
 
-    <!-- RIGHT: Calibration (spans 2 rows) -->
+    <!-- RIGHT: Activity Feed + Calibration (spans 2 rows) -->
     <div class="panel panel-right">
+        <div class="panel-header">
+            <span>Activity Feed</span>
+            <span class="count">Live</span>
+        </div>
+        <div class="activity-feed" id="activity-feed">
+            {% for ev in data.activity %}
+            <div class="activity-entry {{ ev.type }}">{{ ev.ts[:19] }} {{ ev.msg }}</div>
+            {% endfor %}
+            {% if not data.activity %}
+            <div class="activity-entry scan">Waiting for activity...</div>
+            {% endif %}
+        </div>
 
         <div class="calibration-section">
             <div class="panel-header">
@@ -160,50 +164,14 @@
                         {% endif %}
                     {% endfor %}
                 {% else %}
-                <div class="empty-state" style="height:auto;padding:12px;">
-                    Calibration data not yet available — requires resolved markets
+                <div class="empty-state" style="height:auto;padding:8px 0;">
+                    Calibration data not yet available
                 </div>
                 {% endif %}
             </div>
         </div>
     </div>
 
-    <!-- CENTER BOTTOM: Positions + Activity Feed -->
-    <div class="panel">
-        <div class="panel-header">
-            <span>Open Positions</span>
-            <span class="count" id="positions-count">{{ data.open_positions|length }} active</span>
-        </div>
-        <div class="table-wrap">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>City</th><th>Date</th><th>Bucket</th><th>Entry → Now</th><th>EV</th><th>Kelly</th><th>P&amp;L</th>
-                    </tr>
-                </thead>
-                <tbody id="positions-body">
-                    {% if not data.open_positions %}
-                    <tr><td colspan="7" class="empty-cell">No open positions</td></tr>
-                    {% endif %}
-                </tbody>
-            </table>
-        </div>
-
-        <div class="panel-header" style="margin-top:8px;">
-            <span>Activity Feed</span>
-            <span class="count">Live</span>
-        </div>
-        <div class="activity-feed" id="activity-feed">
-            {% for ev in data.activity %}
-            <div class="activity-entry {{ ev.type }}">{{ ev.ts[:19] }} {{ ev.msg }}</div>
-            {% endfor %}
-            {% if not data.activity %}
-            <div class="activity-entry scan">Waiting for activity...</div>
-            {% endif %}
-        </div>
-
-<<<<<<< Updated upstream
-=======
     <!-- CENTER BOTTOM: Trade History -->
     <div class="panel">
         <div class="panel-header">
@@ -232,7 +200,6 @@
                 </tbody>
             </table>
         </div>
->>>>>>> Stashed changes
     </div>
 
 </div>

@@ -146,7 +146,7 @@ body {
 /* ---- Main Grid ---- */
 .main-grid {
     display: grid;
-    grid-template-columns: 1fr 1.5fr 1fr;
+    grid-template-columns: 1fr 1.5fr 0.9fr;
     grid-template-rows: 1fr 1fr;
     gap: 1px;
     background: var(--border);
@@ -405,11 +405,12 @@ body {
 
 /* ---- Calibration Bars ---- */
 .calibration-section {
-    flex: 1;
-    min-height: 0;
+    flex: 0 0 auto;
+    max-height: 240px;
     overflow-y: auto;
-    display: flex;
-    flex-direction: column;
+    margin-top: 8px;
+    border-top: 1px solid var(--border);
+    padding-top: 4px;
 }
 
 .calibration-entry {

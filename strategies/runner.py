@@ -31,12 +31,29 @@ RUNS_DIR   = ROOT / "runs"
 STRATS_DIR = ROOT / "strategies" / "configs"
 
 
+_REQUIRED_FIELDS = ("description", "strategy", "vc_key")
+
+
 def _discover_variants() -> list[str]:
-    """Return sorted list of variant names found in strategies/configs/ (excludes example)."""
-    return sorted(
-        p.stem for p in STRATS_DIR.glob("*.json")
-        if p.stem != "example"
-    )
+    """Return sorted list of valid variant names found in strategies/configs/ (excludes example)."""
+    candidates = [p for p in STRATS_DIR.glob("*.json") if p.stem != "example"]
+    if not candidates:
+        print("warning: strategies/configs/ is empty — no variants found", file=sys.stderr)
+        return []
+
+    variants = []
+    for p in sorted(candidates, key=lambda p: p.stem):
+        try:
+            cfg = json.loads(p.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            print(f"warning: {p.name}: invalid JSON — {e}", file=sys.stderr)
+            continue
+        missing = [f for f in _REQUIRED_FIELDS if f not in cfg]
+        if missing:
+            print(f"warning: {p.name}: missing required fields: {', '.join(missing)} — skipping", file=sys.stderr)
+            continue
+        variants.append(p.stem)
+    return variants
 
 
 # ---------------------------------------------------------------------------

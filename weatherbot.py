@@ -538,13 +538,14 @@ def _check_stops_and_exits(mkt, outcomes, snap, loc, forecast_temp, balance):
             entry = pos["entry_price"]
             stop  = pos.get("stop_price", entry * 0.80)  # 20% stop by default
 
-            # Progressive trailing stop
+            # Progressive trailing stop — tighter near resolution, wider in mid-range
             if current_price >= entry * 1.20:
                 if not pos.get("trailing_activated"):
                     new_stop = entry  # first activation: breakeven
                     pos["trailing_activated"] = True
                 else:
-                    new_stop = round(current_price * 0.80, 4)  # 80% of current
+                    trail_pct = 0.90 if current_price >= 0.92 else 0.75
+                    new_stop = round(current_price * trail_pct, 4)
                 if new_stop > stop:
                     pos["stop_price"] = new_stop
 
@@ -1023,13 +1024,14 @@ def monitor_positions():
         else:
             take_profit = 0.75        # 48h+: take profit at $0.75
 
-        # Progressive trailing stop
+        # Progressive trailing stop — tighter near resolution, wider in mid-range
         if current_price >= entry * 1.20:
             if not pos.get("trailing_activated"):
                 new_stop = entry  # first activation: breakeven
                 pos["trailing_activated"] = True
             else:
-                new_stop = round(current_price * 0.80, 4)  # 80% of current
+                trail_pct = 0.90 if current_price >= 0.92 else 0.75
+                new_stop = round(current_price * trail_pct, 4)
             if new_stop > stop:
                 pos["stop_price"] = new_stop
                 print(f"  [TRAILING] {city_name} {mkt['date']} — stop moved to ${new_stop:.3f}")

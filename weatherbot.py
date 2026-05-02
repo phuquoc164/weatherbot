@@ -576,7 +576,9 @@ def _check_stops_and_exits(mkt, outcomes, snap, loc, forecast_temp, balance):
                 if o["market_id"] == pos["market_id"]:
                     current_price = o["price"]
                     break
-            if current_price is not None:
+            # Market above 0.80 means traders have already priced in the outcome
+            # from real observations — trust the market over the model at that point
+            if current_price is not None and current_price < 0.80:
                 pnl = round((current_price - pos["entry_price"]) * pos["shares"], 2)
                 balance += pos["cost"] + pnl
                 mkt["position"]["closed_at"]    = snap.get("ts")

@@ -538,13 +538,14 @@ def _check_stops_and_exits(mkt, outcomes, snap, loc, forecast_temp, balance):
             entry = pos["entry_price"]
             stop  = pos.get("stop_price", entry * 0.80)  # 20% stop by default
 
-            # Progressive trailing stop
+            # Progressive trailing stop — tighter near resolution, wider in mid-range
             if current_price >= entry * 1.20:
                 if not pos.get("trailing_activated"):
                     new_stop = entry  # first activation: breakeven
                     pos["trailing_activated"] = True
                 else:
-                    new_stop = round(current_price * 0.80, 4)  # 80% of current
+                    trail_pct = 0.90 if current_price >= 0.92 else 0.75
+                    new_stop = round(current_price * trail_pct, 4)
                 if new_stop > stop:
                     pos["stop_price"] = new_stop
 
@@ -562,7 +563,7 @@ def _check_stops_and_exits(mkt, outcomes, snap, loc, forecast_temp, balance):
 
     # --- FORECAST-SHIFT EXIT ---
     pos = mkt.get("position")
-    if pos and forecast_temp is not None:
+    if pos and pos.get("status") == "open" and forecast_temp is not None:
         old_bucket_low  = pos["bucket_low"]
         old_bucket_high = pos["bucket_high"]
         # 2-degree buffer — avoid closing on small forecast fluctuations
@@ -575,7 +576,9 @@ def _check_stops_and_exits(mkt, outcomes, snap, loc, forecast_temp, balance):
                 if o["market_id"] == pos["market_id"]:
                     current_price = o["price"]
                     break
-            if current_price is not None:
+            # Market above 0.80 means traders have already priced in the outcome
+            # from real observations — trust the market over the model at that point
+            if current_price is not None and current_price < 0.80:
                 pnl = round((current_price - pos["entry_price"]) * pos["shares"], 2)
                 balance += pos["cost"] + pnl
                 mkt["position"]["closed_at"]    = snap.get("ts")
@@ -675,6 +678,7 @@ def _try_open_position(mkt, outcomes, snap, loc, horizon_days, balance, state, h
                 best_signal["ev"]           = round(calc_ev(best_signal["p"], real_ask), 4)
         except Exception as e:
             print(f"  [WARN] Could not fetch real ask for {best_signal['market_id']}: {e}")
+            skip_position = True
 
         if not skip_position and best_signal["entry_price"] < MAX_PRICE:
             balance -= best_signal["cost"]
@@ -969,7 +973,7 @@ def print_report():
 # MAIN LOOP
 # =============================================================================
 
-MONITOR_INTERVAL = 600  # monitor positions every 10 minutes
+MONITOR_INTERVAL = 300  # monitor positions every 5 minutes
 
 def monitor_positions():
     """Quick stop check on open positions without full scan."""
@@ -1023,13 +1027,14 @@ def monitor_positions():
         else:
             take_profit = 0.75        # 48h+: take profit at $0.75
 
-        # Progressive trailing stop
+        # Progressive trailing stop — tighter near resolution, wider in mid-range
         if current_price >= entry * 1.20:
             if not pos.get("trailing_activated"):
                 new_stop = entry  # first activation: breakeven
                 pos["trailing_activated"] = True
             else:
-                new_stop = round(current_price * 0.80, 4)  # 80% of current
+                trail_pct = 0.90 if current_price >= 0.92 else 0.75
+                new_stop = round(current_price * trail_pct, 4)
             if new_stop > stop:
                 pos["stop_price"] = new_stop
                 print(f"  [TRAILING] {city_name} {mkt['date']} — stop moved to ${new_stop:.3f}")

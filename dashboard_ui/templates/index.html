@@ -190,12 +190,12 @@
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>City</th><th>Market</th><th>Opened</th><th>Closed</th><th>Dur.</th><th>Entry→Exit</th><th>Reason</th><th class="history-sort-col">P&amp;L</th>
+                        <th>City</th><th>Market</th><th>Bucket</th><th>Opened</th><th>Dur.</th><th>Entry→Exit</th><th>Reason</th><th class="history-sort-col">P&amp;L</th><th class="history-roi-sort-col">ROI</th>
                     </tr>
                 </thead>
                 <tbody id="history-body">
                     {% if not data.closed_positions %}
-                    <tr><td colspan="8" class="empty-cell">No closed trades yet</td></tr>
+                    <tr><td colspan="9" class="empty-cell">No closed trades yet</td></tr>
                     {% endif %}
                 </tbody>
             </table>

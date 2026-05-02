@@ -444,5 +444,125 @@ class TestDynamicEvScaling(unittest.TestCase):
         self.assertAlmostEqual(result, 0.15, places=6)
 
 
+class TestCheckStopsAndExits(unittest.TestCase):
+    """Tests for _check_stops_and_exits — trailing stop tiers and forecast-shift guards."""
+
+    _SNAP = {"ts": "2026-01-01T00:00:00Z"}
+    _LOC  = {"unit": "F", "name": "TestCity"}
+
+    def _mkt(self, entry=0.40, stop_price=None, trailing_activated=False,
+             status="open", bucket_low=32.0, bucket_high=40.0):
+        pos = {
+            "market_id": "m1",
+            "entry_price": entry,
+            "shares": round(2.0 / entry, 4),
+            "cost": 2.0,
+            "stop_price": stop_price if stop_price is not None else round(entry * 0.80, 4),
+            "trailing_activated": trailing_activated,
+            "status": status,
+            "bucket_low": bucket_low,
+            "bucket_high": bucket_high,
+        }
+        return {"position": pos, "date": "2026-01-01"}
+
+    def _outcomes(self, bid, market_id="m1"):
+        return [{"market_id": market_id, "bid": bid, "price": bid}]
+
+    # ------------------------------------------------------------------
+    # Two-tier trailing stop
+    # ------------------------------------------------------------------
+
+    def test_trailing_above_092_uses_90_pct(self):
+        """current_price >= 0.92 → new stop = price * 0.90."""
+        mkt = self._mkt(entry=0.50, stop_price=0.80, trailing_activated=True)
+        weatherbot._check_stops_and_exits(
+            mkt, self._outcomes(bid=0.95), self._SNAP, self._LOC,
+            forecast_temp=None, balance=1000.0,
+        )
+        self.assertAlmostEqual(mkt["position"]["stop_price"], round(0.95 * 0.90, 4))
+
+    def test_trailing_below_092_uses_75_pct(self):
+        """current_price in [entry*1.20, 0.92) → new stop = price * 0.75."""
+        mkt = self._mkt(entry=0.50, stop_price=0.60, trailing_activated=True)
+        weatherbot._check_stops_and_exits(
+            mkt, self._outcomes(bid=0.85), self._SNAP, self._LOC,
+            forecast_temp=None, balance=1000.0,
+        )
+        self.assertAlmostEqual(mkt["position"]["stop_price"], round(0.85 * 0.75, 4))
+
+    def test_trailing_first_activation_sets_breakeven(self):
+        """First time current_price >= entry*1.20: stop rises to entry (breakeven)."""
+        mkt = self._mkt(entry=0.50, stop_price=0.40, trailing_activated=False)
+        weatherbot._check_stops_and_exits(
+            mkt, self._outcomes(bid=0.62), self._SNAP, self._LOC,
+            forecast_temp=None, balance=1000.0,
+        )
+        self.assertEqual(mkt["position"]["stop_price"], 0.50)
+        self.assertTrue(mkt["position"]["trailing_activated"])
+
+    def test_trailing_not_activated_below_threshold(self):
+        """current_price < entry*1.20: trailing stop never activates, stop unchanged."""
+        mkt = self._mkt(entry=0.50, stop_price=0.40, trailing_activated=False)
+        weatherbot._check_stops_and_exits(
+            mkt, self._outcomes(bid=0.55), self._SNAP, self._LOC,
+            forecast_temp=None, balance=1000.0,
+        )
+        self.assertEqual(mkt["position"]["stop_price"], 0.40)
+        self.assertFalse(mkt["position"]["trailing_activated"])
+
+    # ------------------------------------------------------------------
+    # forecast_changed must not overwrite stop_loss
+    # ------------------------------------------------------------------
+
+    def test_stop_loss_close_reason_not_overwritten_by_forecast_changed(self):
+        """Stop fires first → close_reason stays stop_loss even when forecast also diverges."""
+        mkt = self._mkt(entry=0.40, stop_price=0.30)
+        # bid=0.25 triggers stop; forecast_temp=50 is outside bucket [32,40]
+        weatherbot._check_stops_and_exits(
+            mkt, self._outcomes(bid=0.25), self._SNAP, self._LOC,
+            forecast_temp=50.0, balance=1000.0,
+        )
+        self.assertEqual(mkt["position"]["close_reason"], "stop_loss")
+        self.assertEqual(mkt["position"]["status"], "closed")
+
+    def test_stop_loss_balance_not_double_counted(self):
+        """Balance is credited exactly once, not once for stop and again for forecast_changed."""
+        entry = 0.40
+        shares = round(2.0 / entry, 4)
+        initial = 1000.0
+        mkt = self._mkt(entry=entry, stop_price=0.30)
+        balance, closed = weatherbot._check_stops_and_exits(
+            mkt, self._outcomes(bid=0.25), self._SNAP, self._LOC,
+            forecast_temp=50.0, balance=initial,
+        )
+        expected_pnl = round((0.25 - entry) * shares, 2)
+        self.assertAlmostEqual(balance, initial + 2.0 + expected_pnl, places=5)
+        self.assertEqual(closed, 1)
+
+    # ------------------------------------------------------------------
+    # Suppress forecast_changed when market price >= 0.80
+    # ------------------------------------------------------------------
+
+    def test_forecast_changed_suppressed_at_or_above_080(self):
+        """current_price >= 0.80: position stays open even when forecast leaves the bucket."""
+        mkt = self._mkt(entry=0.40)
+        balance, closed = weatherbot._check_stops_and_exits(
+            mkt, self._outcomes(bid=0.85), self._SNAP, self._LOC,
+            forecast_temp=50.0, balance=1000.0,
+        )
+        self.assertEqual(mkt["position"]["status"], "open")
+        self.assertEqual(closed, 0)
+
+    def test_forecast_changed_still_fires_below_080(self):
+        """current_price < 0.80: forecast_changed exit fires normally."""
+        mkt = self._mkt(entry=0.40)
+        _, closed = weatherbot._check_stops_and_exits(
+            mkt, self._outcomes(bid=0.50), self._SNAP, self._LOC,
+            forecast_temp=50.0, balance=1000.0,
+        )
+        self.assertEqual(mkt["position"]["close_reason"], "forecast_changed")
+        self.assertEqual(closed, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

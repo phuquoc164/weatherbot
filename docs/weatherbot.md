@@ -287,7 +287,7 @@ Polymarket temperature markets are divided into discrete buckets parsed from the
 7. Kelly-sized bet ≥ $0.50
 8. Real-time re-check: `bestAsk < MAX_PRICE` AND `spread ≤ MAX_SLIPPAGE`
 
-Step 8 makes a separate live API call to Polymarket. If this call fails (network error), a warning is printed and the trade proceeds using the event-level prices — meaning the slippage and max-price guards may be bypassed in that case.
+Step 8 makes a separate live API call to Polymarket's CLOB endpoint. **If this call fails for any reason, the trade is aborted.** Falling through with event-level prices could expose the bot to phantom entries where the NO price (near zero) slips through the `MAX_PRICE` guard and produces a position with artificially inflated PnL.
 
 ### Bet Sizing
 
@@ -326,13 +326,22 @@ Triggered in the full scan cycle when the current bid ≤ `stop_price`.
 - Default stop: 80% of entry price (implicitly `entry × 0.80`)
 - `close_reason`: `"stop_loss"`
 
-### 2. Trailing Stop to Breakeven
+### 2. Trailing Stop (two-tier)
 
-When the current price reaches `entry × 1.20` (a 20% unrealized gain), `stop_price` is moved up to `entry`. If the price later falls back to entry, the position closes at breakeven.
+When the current price reaches `entry × 1.20` (a 20% unrealized gain), the trailing stop activates. It then follows the price up using a tier based on the current level:
 
-- Activated in both `scan_and_update` and `monitor_positions`
-- `close_reason`: `"trailing_stop"` / `"trailing_be"` (displayed as `TRAILING BE`)
-- Flag `trailing_activated = True` is recorded on the position
+| Current price | Trail factor | Stop set to |
+|---|---|---|
+| First activation (any price ≥ entry×1.20) | — | `entry` (breakeven) |
+| `< 0.92` | 75% | `current_price × 0.75` |
+| `≥ 0.92` | 90% | `current_price × 0.90` |
+
+The wider 25% drawdown below $0.92 tolerates normal mid-day oscillations without premature exit. The tighter 10% drawdown above $0.92 locks in most of the gain once the market is near certainty.
+
+The stop can only move up — it is never lowered. Activated in both `scan_and_update` and `monitor_positions`.
+
+- `close_reason`: `"trailing_stop"` when price falls below a risen stop; `"trailing_be"` when it falls back to entry
+- Flag `trailing_activated = True` is recorded on the position once the stop rises above the default
 
 ### 3. Forecast-Change Close
 
@@ -346,6 +355,8 @@ If the current best forecast shifts away from the bet's bucket, the position is 
 Edge-bucket positions (sentinel endpoints) are never closed this way — the midpoint calculation falls back to the current forecast, making the distance check always fail.
 
 - `close_reason`: `"forecast_changed"`
+
+**Suppression above $0.80:** when the current market price is ≥ $0.80, the forecast-change exit is skipped entirely. At that confidence level other traders have incorporated actual observations (METAR, real temps) that the model hasn't caught up to yet. The trailing stop handles exit if the market reverses; triggering `forecast_changed` above $0.80 was closing winning positions on stale ECMWF reads.
 
 ### 4. Take-Profit (monitor only)
 
@@ -478,7 +489,7 @@ Main loop:
   │       └─ Auto-resolution pass over all open positions
   │             run calibration if enough data
   │
-  └─ Every 10 min (MONITOR_INTERVAL) between scans:
+  └─ Every 5 min (MONITOR_INTERVAL) between scans:
         monitor_positions()
           └─ For each open position:
                fetch live bestBid

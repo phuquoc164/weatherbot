@@ -20,7 +20,7 @@ The bot:
 3. Finds the matching temperature bucket on Polymarket
 4. Calculates Expected Value — only enters if the math is positive
 5. Sizes the position using fractional Kelly Criterion
-6. Monitors stops every 10 minutes, full scan every hour
+6. Monitors stops every 5 minutes, full scan every hour
 7. Auto-resolves markets by querying the Polymarket API directly
 
 ---
@@ -160,7 +160,7 @@ python strategies/compare.py
 
 Each variant reads its config from `strategies/configs/<name>.json` and writes all data to `runs/<name>/data/`. The live bot's `data/` directory is never touched. Variants are staggered by 120 seconds at startup to avoid API rate limits.
 
-Three pre-built configs are included: `prob_model`, `time_decay`, `dynamic_ev`. See `docs/strategy-runner.md` for the full reference.
+Four pre-built configs are included: `prob_model`, `time_decay`, `dynamic_ev`, `low_ev`. See `docs/strategy-runner.md` for the full reference.
 
 ---
 
@@ -174,7 +174,7 @@ Layout: three-column grid (left spans full height, center splits top/bottom, rig
 - **City Stats** *(left top)* — Per-city trade counts (SL/TP/TS/FC breakdown), win rate, and P&L; columns sortable by Trades, Win%, or P&L
 - **Open Positions** *(left bottom)* — Live table with entry → current price, EV, Kelly, and unrealized P&L
 - **Balance History** *(center top)* — Equity curve with 1D/1W/1M/ALL period selector
-- **Trade History** *(center bottom)* — Closed positions with entry→exit prices, duration, close reason, and realized P&L; P&L column sortable; filterable by city and close reason
+- **Trade History** *(center bottom)* — Closed positions with temperature bucket, entry→exit prices, duration, close reason, realized P&L, and ROI; P&L and ROI columns sortable (mutually exclusive); filterable by city and close reason
 - **Activity Feed** *(right top)* — Real-time event log (buys, exits, forecasts)
 - **Calibration** *(right bottom)* — Forecast accuracy (sigma) per city/source with color-coded bar chart
 - **Real-time updates** via WebSocket (file-watcher based, no polling)
@@ -198,9 +198,10 @@ Layout: three-column grid (left spans full height, center splits top/bottom, rig
 - **Expected Value filter** — skips trades where EV < `min_ev`
 - **Kelly Criterion** — quarter-Kelly bet sizing, capped at `max_bet`
 - **Stop-loss** — 20% stop on every position
-- **Trailing stop** — moves to breakeven at +20% gain
+- **Trailing stop** — two-tier: breakeven activation at +20% gain; 75% trail below $0.92 (survives mid-day oscillations), 90% trail at $0.92+ (locks in gains near resolution)
 - **Take-profit** — dynamic thresholds based on hours to resolution
-- **Forecast-change close** — exits early if forecast shifts out of the bet's bucket
+- **Forecast-change close** — exits early if forecast shifts out of the bet's bucket; suppressed when market price ≥ $0.80 (the market has already priced in real observations)
+- **CLOB API safety** — skips opening a position if the real-time price fetch fails, preventing phantom trades from stale prices
 - **Slippage filter** — skips markets with spread > `max_slippage`
 - **Self-calibration** — learns forecast accuracy (sigma) per city/source over time
 - **Dynamic resolution station** — reads Polymarket's `resolutionSource` field on each new market, auto-corrects the station if Polymarket changes it

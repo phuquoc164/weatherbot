@@ -18,7 +18,7 @@ Potential improvements to the trading strategy, to be implemented after the curr
 
 ## 1. Better Probability Model
 
-**Status:** Not implemented
+**Status:** Implemented — enable with `"strategy": { "prob_model_normal_cdf": true }` in `config.json`
 
 ### Problem
 
@@ -114,7 +114,7 @@ def weighted_forecast(snap, hours_left):
 
 ## 3. Time-Decay Confidence
 
-**Status:** Not implemented
+**Status:** Implemented — enable with `"strategy": { "time_decay": true }` in `config.json`
 
 ### Problem
 
@@ -226,7 +226,7 @@ def find_hedge_buckets(forecast, outcomes, sigma):
 
 ## 6. Dynamic MIN_EV Based on Volatility
 
-**Status:** Not implemented
+**Status:** Implemented — enable with `"strategy": { "dynamic_min_ev": true, "sigma_ref": 2.0 }` in `config.json`
 
 ### Problem
 
@@ -268,14 +268,14 @@ def dynamic_min_ev(sigma, base_min_ev=0.10):
 
 When ready to extend the strategy, implement in this order:
 
-| Priority | Improvement | Effort | Impact |
+| Priority | Improvement | Status | Impact |
 |---|---|---|---|
-| 1 | Better Probability Model | Low — 5-line change to `bucket_prob` | High — fixes core modeling flaw |
-| 2 | Ensemble Forecasting | Medium — new `weighted_forecast` function | High — uses already-fetched data |
-| 3 | Time-Decay Confidence | Low — multiplier in `bet_size` | Medium — better risk sizing |
-| 4 | Dynamic MIN_EV | Low — formula using calibrated sigma | Medium — requires calibration data |
-| 5 | Market Momentum Signal | Medium — requires snapshot analysis | Medium — needs more data to validate |
-| 6 | Multi-Bucket Hedging | High — changes position logic | Medium — reduces variance |
+| ~~1~~ | ~~Better Probability Model~~ | **Done** (`prob_model_normal_cdf`) | High — fixes core modeling flaw |
+| 2 | Ensemble Forecasting | Not implemented | High — uses already-fetched data |
+| ~~3~~ | ~~Time-Decay Confidence~~ | **Done** (`time_decay`) | Medium — better risk sizing |
+| ~~4~~ | ~~Dynamic MIN_EV~~ | **Done** (`dynamic_min_ev`) | Medium — requires calibration data |
+| 5 | Market Momentum Signal | Not implemented | Medium — needs more data to validate |
+| 6 | Multi-Bucket Hedging | Not implemented | Medium — reduces variance |
 
 **Prerequisites before implementing any of these:**
 - At least 30 resolved markets per city for calibration to be meaningful

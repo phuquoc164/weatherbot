@@ -232,13 +232,15 @@ body {
 }
 
 .city-sort-col,
-.history-sort-col {
+.history-sort-col,
+.history-roi-sort-col {
     cursor: pointer;
     user-select: none;
 }
 
 .city-sort-col:hover,
-.history-sort-col:hover {
+.history-sort-col:hover,
+.history-roi-sort-col:hover {
     color: var(--text-primary);
 }
 

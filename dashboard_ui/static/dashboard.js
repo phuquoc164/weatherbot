@@ -317,7 +317,8 @@
     // Trade History — filters
     // =========================================================================
     let allHistory = [];
-    let historySortDir = null; // null = closed_at desc (backend order), "desc" = P&L high→low, "asc" = P&L low→high
+    let historySortDir    = null; // null = closed_at desc, "desc" = P&L high→low, "asc" = P&L low→high
+    let historyRoiSortDir = null; // null = no sort, "desc" = ROI high→low, "asc" = ROI low→high
 
     function fmtTs(ts) {
         if (!ts) return "—";
@@ -345,7 +346,14 @@
         if (cityVal)   trades = trades.filter(t => t.city_name    === cityVal);
         if (reasonVal) trades = trades.filter(t => t.close_reason === reasonVal);
 
-        if (historySortDir !== null) {
+        if (historyRoiSortDir !== null) {
+            trades.sort((a, b) => {
+                const roiA = a.cost > 0 ? (a.pnl ?? 0) / a.cost : 0;
+                const roiB = b.cost > 0 ? (b.pnl ?? 0) / b.cost : 0;
+                const cmp = roiA - roiB;
+                return historyRoiSortDir === "desc" ? -cmp : cmp;
+            });
+        } else if (historySortDir !== null) {
             trades.sort((a, b) => {
                 const cmp = (a.pnl ?? 0) - (b.pnl ?? 0);
                 return historySortDir === "desc" ? -cmp : cmp;
@@ -357,6 +365,12 @@
             histSortTh.textContent = historySortDir === "desc" ? "P&L ▼"
                                    : historySortDir === "asc"  ? "P&L ▲"
                                    : "P&L";
+        }
+        const histRoiSortTh = document.querySelector(".history-roi-sort-col");
+        if (histRoiSortTh) {
+            histRoiSortTh.textContent = historyRoiSortDir === "desc" ? "ROI ▼"
+                                      : historyRoiSortDir === "asc"  ? "ROI ▲"
+                                      : "ROI";
         }
 
         const body      = document.getElementById("history-body");
@@ -373,7 +387,7 @@
         }
 
         if (trades.length === 0) {
-            body.innerHTML = '<tr><td colspan="8" class="empty-cell">No closed trades yet</td></tr>';
+            body.innerHTML = '<tr><td colspan="9" class="empty-cell">No closed trades yet</td></tr>';
             return;
         }
 
@@ -382,18 +396,22 @@
             const pnl      = t.pnl ?? 0;
             const pnlClass = pnl >= 0 ? "text-green" : "text-red";
             const pnlSign  = pnl >= 0 ? "+" : "";
+            const roi      = t.cost > 0 ? (pnl / t.cost * 100) : 0;
+            const roiSign  = roi >= 0 ? "+" : "";
             const reason    = t.close_reason || "unknown";
+            const bucket    = t.bucket_low != null ? `${t.bucket_low}-${t.bucket_high}°${t.unit || "F"}` : "—";
             const entryText = t.entry_price != null ? "$" + t.entry_price.toFixed(3) : "—";
             const exitText  = t.exit_price  != null ? "$" + t.exit_price.toFixed(3)  : "—";
             html += `<tr>` +
                 `<td>${t.city_name}</td>` +
                 `<td class="col-mono">${t.date || "—"}</td>` +
+                `<td class="col-mono">${bucket}</td>` +
                 `<td class="col-mono">${fmtTs(t.opened_at)}</td>` +
-                `<td class="col-mono">${fmtTs(t.closed_at)}</td>` +
                 `<td class="col-mono">${fmtDuration(t.opened_at, t.closed_at)}</td>` +
                 `<td class="col-mono">${entryText} → ${exitText}</td>` +
                 `<td><span class="reason-badge reason-${reason}">${reason}</span></td>` +
                 `<td class="${pnlClass}">${pnlSign}$${pnl.toFixed(2)}</td>` +
+                `<td class="${pnlClass}">${roiSign}${roi.toFixed(1)}%</td>` +
                 `</tr>`;
         }
         body.innerHTML = html;
@@ -421,6 +439,12 @@
     document.getElementById("history-filter-reason").addEventListener("change", renderHistory);
     document.querySelector(".history-sort-col").addEventListener("click", () => {
         historySortDir = historySortDir === null ? "desc" : historySortDir === "desc" ? "asc" : null;
+        historyRoiSortDir = null;
+        renderHistory();
+    });
+    document.querySelector(".history-roi-sort-col").addEventListener("click", () => {
+        historyRoiSortDir = historyRoiSortDir === null ? "desc" : historyRoiSortDir === "desc" ? "asc" : null;
+        historySortDir = null;
         renderHistory();
     });
 

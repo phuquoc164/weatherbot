@@ -678,6 +678,7 @@ def _try_open_position(mkt, outcomes, snap, loc, horizon_days, balance, state, h
                 best_signal["ev"]           = round(calc_ev(best_signal["p"], real_ask), 4)
         except Exception as e:
             print(f"  [WARN] Could not fetch real ask for {best_signal['market_id']}: {e}")
+            skip_position = True
 
         if not skip_position and best_signal["entry_price"] < MAX_PRICE:
             balance -= best_signal["cost"]

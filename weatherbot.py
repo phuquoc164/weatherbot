@@ -562,7 +562,7 @@ def _check_stops_and_exits(mkt, outcomes, snap, loc, forecast_temp, balance):
 
     # --- FORECAST-SHIFT EXIT ---
     pos = mkt.get("position")
-    if pos and forecast_temp is not None:
+    if pos and pos.get("status") == "open" and forecast_temp is not None:
         old_bucket_low  = pos["bucket_low"]
         old_bucket_high = pos["bucket_high"]
         # 2-degree buffer — avoid closing on small forecast fluctuations
@@ -969,7 +969,7 @@ def print_report():
 # MAIN LOOP
 # =============================================================================
 
-MONITOR_INTERVAL = 600  # monitor positions every 10 minutes
+MONITOR_INTERVAL = 300  # monitor positions every 5 minutes
 
 def monitor_positions():
     """Quick stop check on open positions without full scan."""

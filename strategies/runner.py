@@ -30,7 +30,30 @@ ROOT       = Path(__file__).parent.parent
 RUNS_DIR   = ROOT / "runs"
 STRATS_DIR = ROOT / "strategies" / "configs"
 
-VARIANTS = ["baseline", "prob_model", "time_decay", "dynamic_ev", "combined"]
+
+_REQUIRED_FIELDS = ("description", "strategy", "vc_key")
+
+
+def _discover_variants() -> list[str]:
+    """Return sorted list of valid variant names found in strategies/configs/ (excludes example)."""
+    candidates = [p for p in STRATS_DIR.glob("*.json") if p.stem != "example"]
+    if not candidates:
+        print("warning: strategies/configs/ is empty — no variants found", file=sys.stderr)
+        return []
+
+    variants = []
+    for p in sorted(candidates, key=lambda p: p.stem):
+        try:
+            cfg = json.loads(p.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            print(f"warning: {p.name}: invalid JSON — {e}", file=sys.stderr)
+            continue
+        missing = [f for f in _REQUIRED_FIELDS if f not in cfg]
+        if missing:
+            print(f"warning: {p.name}: missing required fields: {', '.join(missing)} — skipping", file=sys.stderr)
+            continue
+        variants.append(p.stem)
+    return variants
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +100,7 @@ def read_state(name: str) -> dict:
 
 def cmd_setup(target: str | None = None):
     """Create isolated run directories for each variant."""
-    names = [target] if target else VARIANTS
+    names = [target] if target else _discover_variants()
     for name in names:
         cfg_file = STRATS_DIR / f"{name}.json"
         if not cfg_file.exists():
@@ -107,7 +130,7 @@ def cmd_start(target: str | None = None, stagger: int = 120):
     Each bot scans every ~3600s, so a 120s stagger keeps them
     permanently offset and avoids simultaneous API bursts.
     """
-    names = [target] if target else VARIANTS
+    names = [target] if target else _discover_variants()
 
     for idx, name in enumerate(names):
         vdir = variant_dir(name)
@@ -136,7 +159,7 @@ def cmd_start(target: str | None = None, stagger: int = 120):
 
         pid_file(name).write_text(str(proc.pid))
         flags = _active_flags(name)
-        print(f"[start] {name:15s} pid={proc.pid}  flags: {flags or 'none (baseline)'}")
+        print(f"[start] {name:15s} pid={proc.pid}  flags: {flags or 'none'}")
 
         if idx < len(names) - 1:
             print(f"         (waiting {stagger}s before next variant to avoid API rate limits…)")
@@ -145,7 +168,7 @@ def cmd_start(target: str | None = None, stagger: int = 120):
 
 def cmd_status(target: str | None = None):
     """Print running/stopped status and key P&L metrics."""
-    names = [target] if target else VARIANTS
+    names = [target] if target else _discover_variants()
     print(f"\n{'Variant':<16} {'Status':<10} {'Balance':>10} {'PnL':>10} {'Trades':>7}")
     print("-" * 58)
     for name in names:
@@ -168,7 +191,7 @@ def cmd_status(target: str | None = None):
 
 def cmd_stop(target: str | None = None):
     """Send SIGTERM to running variants."""
-    names = [target] if target else VARIANTS
+    names = [target] if target else _discover_variants()
     for name in names:
         pf = pid_file(name)
         if not pf.exists():

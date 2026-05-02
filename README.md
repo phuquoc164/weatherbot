@@ -149,7 +149,7 @@ Run multiple strategy variants simultaneously in isolated directories to compare
 python strategies/runner.py setup
 
 # Start a variant
-python strategies/runner.py start baseline
+python strategies/runner.py start prob_model
 
 # Check status of all variants
 python strategies/runner.py status
@@ -160,7 +160,7 @@ python strategies/compare.py
 
 Each variant reads its config from `strategies/configs/<name>.json` and writes all data to `runs/<name>/data/`. The live bot's `data/` directory is never touched. Variants are staggered by 120 seconds at startup to avoid API rate limits.
 
-Five pre-built configs are included: `baseline`, `prob_model`, `time_decay`, `dynamic_ev`, `combined`. See `docs/strategy-runner.md` for the full reference.
+Three pre-built configs are included: `prob_model`, `time_decay`, `dynamic_ev`. See `docs/strategy-runner.md` for the full reference.
 
 ---
 

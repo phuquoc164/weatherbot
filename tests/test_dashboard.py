@@ -138,28 +138,28 @@ class TestVariantPidRunning(unittest.TestCase):
 
     def test_no_pid_file_returns_false(self):
         with patch.object(dashboard, "RUNS_DIR", self.tmp):
-            self.assertFalse(_variant_pid_running("baseline"))
+            self.assertFalse(_variant_pid_running("prob_model"))
 
     def test_non_integer_pid_file_returns_false(self):
-        d = self.tmp / "baseline"
+        d = self.tmp / "prob_model"
         d.mkdir(parents=True)
         (d / "weatherbot.pid").write_text("not-a-pid", encoding="utf-8")
         with patch.object(dashboard, "RUNS_DIR", self.tmp):
-            self.assertFalse(_variant_pid_running("baseline"))
+            self.assertFalse(_variant_pid_running("prob_model"))
 
     def test_dead_pid_returns_false(self):
-        d = self.tmp / "baseline"
+        d = self.tmp / "prob_model"
         d.mkdir(parents=True)
         (d / "weatherbot.pid").write_text("99999999", encoding="utf-8")
         with patch.object(dashboard, "RUNS_DIR", self.tmp):
-            self.assertFalse(_variant_pid_running("baseline"))
+            self.assertFalse(_variant_pid_running("prob_model"))
 
     def test_own_pid_returns_true(self):
-        d = self.tmp / "baseline"
+        d = self.tmp / "prob_model"
         d.mkdir(parents=True)
         (d / "weatherbot.pid").write_text(str(os.getpid()), encoding="utf-8")
         with patch.object(dashboard, "RUNS_DIR", self.tmp):
-            self.assertTrue(_variant_pid_running("baseline"))
+            self.assertTrue(_variant_pid_running("prob_model"))
 
 
 class TestApiVariants(unittest.TestCase):
@@ -182,7 +182,7 @@ class TestApiVariants(unittest.TestCase):
         self.assertFalse(data["main_running"])
 
     def test_variant_listed_when_config_json_exists(self):
-        d = self.tmp / "baseline"
+        d = self.tmp / "prob_model"
         d.mkdir(parents=True)
         (d / "config.json").write_text(json.dumps({}), encoding="utf-8")
         with (
@@ -192,7 +192,7 @@ class TestApiVariants(unittest.TestCase):
             resp = client.get("/api/variants")
         data = resp.json()
         self.assertEqual(len(data["variants"]), 1)
-        self.assertEqual(data["variants"][0]["name"], "baseline")
+        self.assertEqual(data["variants"][0]["name"], "prob_model")
 
     def test_main_running_true_when_state_file_exists(self):
         state_file = self.tmp / "state.json"
@@ -209,17 +209,22 @@ class TestApiSourceDashboard(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
+        # Create a discoverable variant (config.json in runs/<name>/)
+        variant_dir = self.tmp / "prob_model"
+        variant_dir.mkdir()
+        (variant_dir / "config.json").write_text("{}", encoding="utf-8")
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_unknown_variant_returns_404(self):
-        resp = client.get("/api/source/notavariant/dashboard")
+        with patch.object(dashboard, "RUNS_DIR", self.tmp):
+            resp = client.get("/api/source/notavariant/dashboard")
         self.assertEqual(resp.status_code, 404)
 
     def test_known_variant_returns_200_with_kpi(self):
         with patch.object(dashboard, "RUNS_DIR", self.tmp):
-            resp = client.get("/api/source/baseline/dashboard")
+            resp = client.get("/api/source/prob_model/dashboard")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertIn("kpi", data)
@@ -228,12 +233,12 @@ class TestApiSourceDashboard(unittest.TestCase):
 
     def test_variant_response_has_empty_balance_history(self):
         with patch.object(dashboard, "RUNS_DIR", self.tmp):
-            resp = client.get("/api/source/baseline/dashboard")
+            resp = client.get("/api/source/prob_model/dashboard")
         self.assertEqual(resp.json()["balance_history"], [])
 
     def test_variant_response_has_empty_activity(self):
         with patch.object(dashboard, "RUNS_DIR", self.tmp):
-            resp = client.get("/api/source/baseline/dashboard")
+            resp = client.get("/api/source/prob_model/dashboard")
         self.assertEqual(resp.json()["activity"], [])
 
     def test_variant_bot_status_running_reflects_pid_check(self):
@@ -241,7 +246,7 @@ class TestApiSourceDashboard(unittest.TestCase):
             patch.object(dashboard, "RUNS_DIR", self.tmp),
             patch.object(dashboard, "_variant_pid_running", return_value=True),
         ):
-            resp = client.get("/api/source/baseline/dashboard")
+            resp = client.get("/api/source/prob_model/dashboard")
         self.assertTrue(resp.json()["bot_status"]["running"])
 
     def test_variant_bot_status_stopped_when_no_pid(self):
@@ -249,7 +254,7 @@ class TestApiSourceDashboard(unittest.TestCase):
             patch.object(dashboard, "RUNS_DIR", self.tmp),
             patch.object(dashboard, "_variant_pid_running", return_value=False),
         ):
-            resp = client.get("/api/source/baseline/dashboard")
+            resp = client.get("/api/source/prob_model/dashboard")
         self.assertFalse(resp.json()["bot_status"]["running"])
 
     def test_stopped_variant_still_returns_valid_kpi(self):
@@ -259,7 +264,7 @@ class TestApiSourceDashboard(unittest.TestCase):
         them selectable and relies on this endpoint being reachable regardless of
         running state.
         """
-        markets_dir = self.tmp / "baseline" / "data" / "markets"
+        markets_dir = self.tmp / "prob_model" / "data" / "markets"
         markets_dir.mkdir(parents=True)
         (markets_dir / "nyc.json").write_text(
             json.dumps({
@@ -273,7 +278,7 @@ class TestApiSourceDashboard(unittest.TestCase):
             patch.object(dashboard, "RUNS_DIR", self.tmp),
             patch.object(dashboard, "_variant_pid_running", return_value=False),
         ):
-            resp = client.get("/api/source/baseline/dashboard")
+            resp = client.get("/api/source/prob_model/dashboard")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertFalse(data["bot_status"]["running"])
@@ -332,7 +337,7 @@ class TestApiComparison(unittest.TestCase):
         though closed-trade P&L is positive.  The old formula produced a
         negative ROI in that situation.
         """
-        d = self.tmp / "baseline"
+        d = self.tmp / "prob_model"
         d.mkdir(parents=True)
         (d / "config.json").write_text(json.dumps({}), encoding="utf-8")
         data_dir = d / "data"
@@ -351,11 +356,11 @@ class TestApiComparison(unittest.TestCase):
             patch.object(dashboard, "RUNS_DIR", self.tmp),
         ):
             resp = client.get("/api/comparison")
-        variant = next(s for s in resp.json()["sources"] if s["name"] == "baseline")
+        variant = next(s for s in resp.json()["sources"] if s["name"] == "prob_model")
         self.assertGreater(variant["roi"], 0, "ROI must be positive when P&L is positive")
 
     def test_variant_pnl_summed_from_closed_positions(self):
-        d = self.tmp / "baseline"
+        d = self.tmp / "prob_model"
         d.mkdir(parents=True)
         (d / "config.json").write_text(json.dumps({}), encoding="utf-8")
         markets = d / "data" / "markets"
@@ -371,7 +376,7 @@ class TestApiComparison(unittest.TestCase):
             patch.object(dashboard, "RUNS_DIR", self.tmp),
         ):
             resp = client.get("/api/comparison")
-        variant = next(s for s in resp.json()["sources"] if s["name"] == "baseline")
+        variant = next(s for s in resp.json()["sources"] if s["name"] == "prob_model")
         self.assertAlmostEqual(variant["pnl"], 20.0, places=2)
         self.assertEqual(variant["trades"], 2)
 

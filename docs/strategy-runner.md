@@ -10,22 +10,16 @@ If we test improvements one after another, comparing 5 variants takes months.
 
 ## The Solution: Parallel Isolation
 
-Instead of testing improvements sequentially, we run **5 copies of the bot simultaneously** — one per strategy variant. Each copy runs in its own isolated directory with its own config, its own `data/` folder, and its own calibration. They never interfere with each other.
+Instead of testing improvements sequentially, we run multiple copies of the bot simultaneously — one per strategy variant. Each copy runs in its own isolated directory with its own config, its own `data/` folder, and its own calibration. They never interfere with each other.
 
 ```
 runs/
-├── baseline/          ← control group, no improvements
-│   ├── weatherbot.py  ← symlink to the real bot
-│   ├── config.json    ← copied from strategies/baseline.json
-│   ├── data/          ← isolated market files, calibration, state
-│   └── logs/
 ├── prob_model/        ← improvement #1: normal CDF for all buckets
 ├── time_decay/        ← improvement #3: smaller bets on D+2/D+3
-├── dynamic_ev/        ← improvement #6: higher MIN_EV in volatile cities
-└── combined/          ← all three improvements at once
+└── dynamic_ev/        ← improvement #6: higher MIN_EV in volatile cities
 ```
 
-After 4–6 weeks, all 5 variants have traded the **same markets at the same prices**, so the comparison is apples-to-apples. The only difference between variants is the strategy flags in their config.
+After 4–6 weeks, all variants have traded the **same markets at the same prices**, so the comparison is apples-to-apples. The only difference between variants is the strategy flags in their config. The main bot serves as the control group.
 
 ---
 
@@ -33,11 +27,10 @@ After 4–6 weeks, all 5 variants have traded the **same markets at the same pri
 
 | Variant | Flags enabled | What it tests |
 |---|---|---|
-| `baseline` | none | Current behavior — the control group |
+| main bot | none | Control group — binary p=1.0, no modifications |
 | `prob_model` | `prob_model_normal_cdf: true` | Improvement #1: interior buckets use normal CDF instead of binary 0/1 |
 | `time_decay` | `time_decay: true` | Improvement #3: bets scaled by horizon (D+0 full size, D+3 = 40%) |
 | `dynamic_ev` | `dynamic_min_ev: true` | Improvement #6: MIN_EV scaled by city sigma (more selective in volatile markets) |
-| `combined` | all three | All improvements together — expected best performer |
 
 ---
 
@@ -54,7 +47,7 @@ STRAT_DYNAMIC_EV = _strat.get("dynamic_min_ev", False)
 
 **Improvement #1 — `bucket_prob`:**
 ```python
-# baseline: interior bucket returns 1.0 if forecast lands in it, 0.0 otherwise
+# main bot: interior bucket returns 1.0 if forecast lands in it, 0.0 otherwise
 # prob_model: applies normal distribution to interior buckets too
 if STRAT_PROB_MODEL:
     return norm_cdf((t_high - forecast) / s) - norm_cdf((t_low - forecast) / s)
@@ -84,59 +77,72 @@ Chicago in March (sigma≈2.8°F) requires higher EV to enter than Singapore (si
 
 ## How to Use It
 
-### Step 1 — Setup (one time)
+### Step 1 — Create your variant config
 
-Creates the isolated run directories and symlinks:
+The runner **auto-discovers** all JSON files in `strategies/configs/` (except `example.json`). To create a new variant, copy the example and edit it:
 
 ```bash
-python strategy_runner.py setup
+cp strategies/configs/example.json strategies/configs/my_variant.json
 ```
 
-**What it does:** For each variant, creates `runs/<variant>/`, copies the strategy config as `config.json`, and symlinks `weatherbot.py` from the repo root (so changes to the bot code are reflected immediately without re-running setup).
+Then edit `my_variant.json` — set your `vc_key`, choose a `description`, and enable the strategy flags you want to test:
+
+```json
+{
+  "description": "Test prob_model with tighter EV threshold",
+  "balance": 1000.0,
+  "max_bet": 2.0,
+  "min_ev": 0.35,
+  "vc_key": "YOUR_VISUAL_CROSSING_KEY_HERE",
+  "strategy": {
+    "prob_model_normal_cdf": true,
+    "time_decay": false,
+    "dynamic_min_ev": false,
+    "sigma_ref": 2.0
+  }
+}
+```
+
+Config files in `strategies/configs/` are gitignored (they contain your API key). `example.json` is the only committed file.
 
 ---
 
-### Step 2 — Add your vc_key
-
-Each `runs/<variant>/config.json` has `"vc_key": ""`. Fill it in (Visual Crossing key is needed for resolution):
+### Step 2 — Setup (one time per variant)
 
 ```bash
-# Quick way — replace in all variants at once
-for d in runs/*/; do
-  python3 -c "
-import json, pathlib
-p = pathlib.Path('$d/config.json')
-c = json.loads(p.read_text())
-c['vc_key'] = 'YOUR_KEY_HERE'
-p.write_text(json.dumps(c, indent=2))
-"
-done
+python strategies/runner.py setup
 ```
+
+**What it does:** For each discovered variant config, creates `runs/<variant>/`, copies the config as `config.json`, and symlinks `weatherbot.py` from the repo root (so bug fixes apply automatically without re-running setup).
 
 ---
 
 ### Step 3 — Start
 
 ```bash
-python strategy_runner.py start         # start all 5 variants
-python strategy_runner.py start baseline  # or just one
+python strategies/runner.py start              # start all variants
+python strategies/runner.py start my_variant   # or just one
 ```
 
-Each variant starts as a background subprocess with its own log. Variants are staggered **60 seconds apart** to avoid hammering the forecast APIs simultaneously.
+Variants are staggered **120 seconds apart** by default to avoid simultaneous API bursts. Override with `--stagger`:
+
+```bash
+python strategies/runner.py start --stagger 60
+```
 
 ---
 
 ### Step 4 — Monitor
 
 ```bash
-python strategy_runner.py status        # balance, P&L, trade count for all variants
-python strategy_runner.py logs baseline # last 50 lines of a variant's log
+python strategies/runner.py status             # balance, P&L, trade count for all variants
+python strategies/runner.py logs prob_model    # last 50 lines of a variant's log
 ```
 
 Compare all variants side-by-side:
 
 ```bash
-python strategy_compare.py
+python strategies/compare.py
 ```
 
 Example output (after 2 weeks):
@@ -144,13 +150,11 @@ Example output (after 2 weeks):
 ```
 Variant          Description                                Balance      PnL    ROI%  Trades  Wins  WinRate    AvgEV
 ----------------------------------------------------------------------------------------------------------------------
-baseline         No improvements (control)                 1023.40   +23.40   +2.3%      18    11    61.1%   0.3421
 prob_model       Normal CDF for interior buckets (#1)      1041.20   +41.20   +4.1%      22    14    63.6%   0.2987
 time_decay       Horizon multiplier on bet size (#3)       1031.80   +31.80   +3.2%      18    12    66.7%   0.3421
 dynamic_ev       Dynamic MIN_EV by sigma (#6)              1028.60   +28.60   +2.9%      14    10    71.4%   0.3812
-combined         All three improvements combined           1057.40   +57.40   +5.7%      20    14    70.0%   0.3105
 
-Best P&L so far: combined (+57.40)
+Best P&L so far: prob_model (+41.20)
 Most trades:     prob_model (22 trades)
 ```
 
@@ -159,8 +163,8 @@ Most trades:     prob_model (22 trades)
 ### Step 5 — Stop
 
 ```bash
-python strategy_runner.py stop          # stop all 5
-python strategy_runner.py stop baseline # or just one
+python strategies/runner.py stop               # stop all variants
+python strategies/runner.py stop prob_model    # or just one
 ```
 
 ---
@@ -173,11 +177,14 @@ No. Each variant runs in its own `runs/<variant>/` directory, with its own `data
 **Why symlink weatherbot.py instead of copying?**
 Because if you fix a bug in the main bot during the experiment, the fix automatically applies to all variants — you don't need to re-setup. Only configs are copied (not symlinked) because each variant needs its own flags.
 
+**Why are my configs gitignored?**
+Config files contain your `vc_key` (Visual Crossing API key). Committing API keys is a security risk. Copy `strategies/configs/example.json`, fill in your key, and keep it local.
+
 **What if I want to stop and restart a variant mid-experiment?**
-Just run `stop` then `start` for that variant. The market files and state.json persist, so it picks up where it left off.
+Just run `stop` then `start` for that variant. The market files and `state.json` persist, so it picks up where it left off.
 
 **When is the data meaningful?**
 After at least **30 resolved markets per city** (per the `calibration_min` setting). In practice, plan for **4–6 weeks** of live operation before drawing conclusions. After 2 weeks you'll have directional signal; after 6 weeks you'll have statistical confidence.
 
 **Can I add a new variant mid-experiment?**
-Yes — create a new JSON in `strategies/`, add it to `VARIANTS` in both runner and compare scripts, run `setup` for just that variant, and `start` it. It starts fresh while the others continue.
+Yes — create a new JSON in `strategies/configs/`, run `setup` for just that variant, and `start` it. It starts fresh while the others continue. No code changes needed.
